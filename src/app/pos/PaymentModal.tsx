@@ -52,19 +52,21 @@ export default function PaymentModal({ isOpen, onClose, pedidoId, total, onPayme
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/[0.06] bg-zinc-900 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-[var(--radius-lg)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)]">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.04] px-6 py-4">
+        <div className="flex items-center justify-between border-b-[0.5px] border-[var(--border-default)] px-6 py-4">
           <div>
-            <h3 className="text-[15px] font-bold text-white">Cobro Digital — QR Simple</h3>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Interoperabilidad ASFI - Bolivia</p>
+            <h3 className="text-[15px] font-medium text-[var(--text-primary)]">Cobro Digital — QR Simple</h3>
+            <p className="text-[10px] text-[var(--text-dim)] font-normal mt-0.5">Interoperabilidad ASFI - Bolivia</p>
           </div>
           {!success && (
-            <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.03] text-zinc-500 hover:text-white hover:bg-white/[0.06] transition-all" disabled={loading}>
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
+            <button
+              onClick={onClose}
+              className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-white transition-all text-[11px]"
+              disabled={loading}
+            >
+              ✕
             </button>
           )}
         </div>
@@ -73,22 +75,22 @@ export default function PaymentModal({ isOpen, onClose, pedidoId, total, onPayme
           {!success ? (
             <div className="space-y-5">
               {/* Order summary */}
-              <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
+              <div className="flex items-center justify-between rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] p-4">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Pedido</p>
-                  <p className="text-xl font-extrabold text-indigo-400">#{pedidoId}</p>
+                  <p className="text-[9px] uppercase tracking-wider text-[var(--text-dim)] font-normal">Pedido</p>
+                  <p className="text-[16px] font-medium text-[var(--accent)] mt-0.5">#{pedidoId}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Total</p>
-                  <p className="text-2xl font-extrabold text-white tracking-tight">{formatCurrency(total)}</p>
+                  <p className="text-[9px] uppercase tracking-wider text-[var(--text-dim)] font-normal">Total</p>
+                  <p className="text-[18px] font-medium text-[var(--text-primary)] tracking-tight mt-0.5">{formatCurrency(total)}</p>
                 </div>
               </div>
 
               {/* QR + JSON side by side */}
               <div className="grid gap-4 sm:grid-cols-2">
-                {/* QR Visual */}
-                <div className="flex flex-col items-center justify-center rounded-xl bg-white p-5">
-                  <div className="relative flex h-32 w-32 items-center justify-center rounded-lg border-2 border-indigo-500 p-1">
+                {/* QR Centrado */}
+                <div className="flex flex-col items-center justify-center rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-white p-5">
+                  <div className="relative flex h-28 w-28 items-center justify-center p-1">
                     <svg className="h-full w-full text-zinc-900" viewBox="0 0 100 100">
                       <rect x="0" y="0" width="28" height="28" fill="currentColor" />
                       <rect x="4" y="4" width="20" height="20" fill="white" />
@@ -111,80 +113,62 @@ export default function PaymentModal({ isOpen, onClose, pedidoId, total, onPayme
                       <rect x="72" y="60" width="20" height="12" fill="currentColor" />
                       <rect x="56" y="80" width="34" height="8" fill="currentColor" />
                       <rect x="42" y="42" width="16" height="16" fill="white" />
-                      <text x="50" y="54" fontSize="12" textAnchor="middle" fill="#4f46e5">G</text>
+                      <text x="50" y="54" fontSize="12" textAnchor="middle" fill="#1D9E75">G</text>
                     </svg>
-                    <div className="absolute -bottom-2 rounded-full bg-indigo-600 px-2 py-0.5 text-[8px] font-bold text-white shadow-lg">
-                      QR Simple
-                    </div>
                   </div>
-                  <p className="mt-3 text-[9px] text-zinc-500 text-center uppercase tracking-wide leading-relaxed">
-                    Escanea con cualquier app bancaria (Simulado)
+                  <p className="mt-2 text-[9px] text-zinc-500 text-center uppercase tracking-wide leading-relaxed font-normal">
+                    QR Simple Bolivia
                   </p>
                 </div>
 
                 {/* JSON payload */}
                 <div className="flex flex-col">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">Payload ASFI</label>
-                  <pre className="flex-1 rounded-xl border border-white/[0.04] bg-zinc-950 p-3 text-[9px] font-mono text-zinc-500 overflow-x-auto leading-relaxed">
+                  <label className="text-[9px] uppercase tracking-wider text-[var(--text-dim)] font-normal mb-1">Payload ASFI</label>
+                  <pre className="flex-1 rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-[9px] font-mono text-[var(--text-dim)] overflow-x-auto leading-relaxed">
                     {JSON.stringify(qrPayload, null, 2)}
                   </pre>
                 </div>
               </div>
 
               {error && (
-                <div className="rounded-xl border border-rose-500/10 bg-rose-500/5 p-3 text-[12px] text-rose-400">{error}</div>
+                <div className="rounded-[var(--radius-sm)] border-[0.5px] border-[var(--danger)] bg-[var(--bg-surface)] p-3 text-[12px] text-[var(--danger)] font-normal">
+                  {error}
+                </div>
               )}
 
-              {/* CTA */}
+              {/* Simulación Botón Primario */}
               <button
                 onClick={handlePay}
                 disabled={loading}
-                className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-3.5 font-bold text-white shadow-xl shadow-indigo-500/20 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
+                className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] px-4 py-3.5 font-medium text-white text-[13px] transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-40"
               >
-                {loading ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                    Procesando Webhook…
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center gap-2">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-                    </svg>
-                    Simular Notificación de Pago (Webhook)
-                  </span>
-                )}
+                {loading ? 'Procesando Webhook…' : 'Simular Notificación de Pago (Webhook)'}
               </button>
             </div>
           ) : (
             /* Success State */
             <div className="flex flex-col items-center justify-center py-6 text-center space-y-4">
-              <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-pulse-ring" />
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10">
-                  <svg className="h-8 w-8 text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border-[0.5px] border-[var(--accent)] bg-[var(--bg-surface)] text-[var(--accent)] text-lg">
+                ✓
               </div>
 
               <div>
-                <h4 className="text-lg font-bold text-white">Pago Confirmado</h4>
-                <p className="text-[12px] text-zinc-500 mt-1 max-w-xs mx-auto">
-                  El estado del pedido cambió a <strong className="text-emerald-400">Pagado</strong>. El trigger de PostgreSQL recalculó el inventario.
+                <h4 className="text-[16px] font-medium text-white">Pago Confirmado</h4>
+                <p className="text-[12px] text-[var(--text-muted)] mt-1.5 max-w-xs mx-auto leading-relaxed">
+                  El estado del pedido cambió a <strong className="text-[var(--accent)] font-medium">Pagado</strong>. El trigger de PostgreSQL recalculó el inventario.
                 </p>
               </div>
 
-              <div className="w-full rounded-xl border border-emerald-500/10 bg-emerald-500/[0.03] p-4 text-left">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Base de Datos</p>
-                <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  <code className="rounded bg-white/[0.04] px-1 py-0.5 text-emerald-400 text-[10px] font-mono">trg_descontar_inventario</code> se ejecutó exitosamente. El stock físico fue decrementado con precisión NUMERIC(12,4).
+              <div className="w-full rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] p-4 text-left">
+                <p className="text-[9px] uppercase tracking-wider text-[var(--accent)] font-medium mb-1">Base de Datos</p>
+                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed font-normal">
+                  El descuento de recetas fue aplicado de forma agrupada en insumos base con precisión decimal.
                 </p>
               </div>
 
               <button
                 onClick={handleFinalize}
-                className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 font-semibold text-white transition-all hover:bg-white/[0.06]"
+                className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-[var(--accent)] bg-transparent px-4 py-3 text-[12px] font-medium text-[var(--accent)] transition-all hover:bg-[var(--accent-dark)] hover:text-white"
               >
                 Cerrar y Limpiar Carrito
               </button>

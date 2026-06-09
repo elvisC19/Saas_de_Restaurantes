@@ -182,3 +182,15 @@ SELECT setval(pg_get_serial_sequence('receta_detail', 'id'), COALESCE(MAX(id), 1
   6. Limpiar prueba
      DELETE FROM pedidos WHERE id = 999;
 */
+
+-- =============================================================================
+-- MIGRACIONES POST-MVP
+-- =============================================================================
+-- Añadir columna 'giro' a la tabla de empresas sin borrar datos existentes
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS giro VARCHAR(20) CHECK (giro IN ('CAFETERIA', 'RESTAURANTE'));
+UPDATE empresas SET giro = 'CAFETERIA' WHERE giro IS NULL;
+ALTER TABLE empresas ALTER COLUMN giro SET NOT NULL;
+
+-- Habilitar el rol 'SuperAdmin' en el CHECK constraint de la tabla usuarios
+ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
+ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK (rol IN ('Administrador', 'Cajero', 'Cocina', 'SuperAdmin'));

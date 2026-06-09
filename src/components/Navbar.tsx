@@ -8,17 +8,18 @@ const navLinks = [
   { href: '/pos', label: 'Punto de Venta', icon: '◉', roles: ['Administrador', 'Cajero'] },
   { href: '/cocina', label: 'Cocina KDS', icon: '◎', roles: ['Administrador', 'Cocina'] },
   { href: '/admin', label: 'Dashboard', icon: '◈', roles: ['Administrador'] },
+  { href: '/superadmin', label: 'Super Admin', icon: '✦', roles: ['SuperAdmin'] },
 ];
 
 export default function Navbar() {
-  const { rol, setRol, empresaNombre } = useAuth();
+  const { rol, logout, empresaNombre } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
   if (!rol) return null;
 
   const handleLogout = () => {
-    setRol(null);
+    logout();
     router.push('/');
   };
 
@@ -26,6 +27,7 @@ export default function Navbar() {
     Administrador: 'from-indigo-500 to-violet-600',
     Cajero: 'from-amber-500 to-orange-600',
     Cocina: 'from-emerald-500 to-teal-600',
+    SuperAdmin: 'from-purple-600 to-fuchsia-600',
   };
 
   return (

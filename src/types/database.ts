@@ -2,10 +2,11 @@ export interface Empresa {
   id: number;
   nombre: string;
   plan_mensual: string; // NUMERIC(10,2) - Ejemplo: "280.00"
+  giro?: 'CAFETERIA' | 'RESTAURANTE';
   creado_at?: string;
 }
 
-export type RolUsuario = 'Administrador' | 'Cajero' | 'Cocina';
+export type RolUsuario = 'Administrador' | 'Cajero' | 'Cocina' | 'SuperAdmin';
 
 export interface Usuario {
   id: string; // UUID referenciando auth.users

@@ -17,7 +17,7 @@ export default function PosPage() {
   const { rol, empresaId, giro } = useAuth();
   const router = useRouter();
 
-  const [productos, setProductos] = useState<ItemMenu[]>([]);
+  const [productos, setProductos] = useState<(ItemMenu & { hasStock: boolean })[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -34,38 +34,96 @@ export default function PosPage() {
     }
   }, [rol, giro, router]);
 
-  useEffect(() => {
-    async function loadMenu() {
-      if (!rol || !giro) return;
-      setLoadingItems(true);
-      try {
-        const { data, error } = await supabase
-          .from('items_menu')
-          .select('*')
-          .eq('empresa_id', empresaId)
-          .order('nombre', { ascending: true });
-        if (error) throw error;
-        
-        const allItems = data || [];
-        const filtered = allItems.filter((item) => {
-          if (giro === 'RESTAURANTE') {
-            return item.nombre === 'Lomo Saltado' || item.nombre === 'Sopa de Maní';
-          } else {
-            // CAFETERIA
-            return item.nombre === 'Café Americano' || item.nombre === 'Café con Leche' || item.nombre === 'Café Espresso' || item.nombre === 'Capuccino';
-          }
-        });
-        setProductos(filtered);
-      } catch (err: any) {
-        setErrorMsg('Error de conexión al cargar el menú.');
-      } finally {
-        setLoadingItems(false);
-      }
+  const loadMenu = async () => {
+    if (!rol || !giro) return;
+    try {
+      // 1. Cargar items del menú
+      const { data: menuData, error: menuError } = await supabase
+        .from('items_menu')
+        .select('*')
+        .eq('empresa_id', empresaId)
+        .order('nombre', { ascending: true });
+      if (menuError) throw menuError;
+
+      // 2. Cargar insumos
+      const { data: insumosData, error: insumosError } = await supabase
+        .from('inventario_insumos')
+        .select('*')
+        .eq('empresa_id', empresaId);
+      if (insumosError) throw insumosError;
+
+      // 3. Cargar recetas
+      const { data: recetasData, error: recetasError } = await supabase
+        .from('receta_detail')
+        .select('*');
+      if (recetasError) throw recetasError;
+
+      const insumoMap = new Map<number, number>();
+      (insumosData || []).forEach((ins) => {
+        insumoMap.set(ins.id, parseFloat(ins.stock_actual || '0'));
+      });
+
+      const itemRecetas = (recetasData || []).reduce((acc: Record<number, { insumoId: number; qty: number }[]>, r: any) => {
+        if (!acc[r.item_menu_id]) acc[r.item_menu_id] = [];
+        acc[r.item_menu_id].push({ insumoId: r.insumo_id, qty: parseFloat(r.cantidad_requerida || '0') });
+        return acc;
+      }, {});
+
+      const allItems = menuData || [];
+      const filtered = allItems.filter((item) => {
+        if (giro === 'RESTAURANTE') {
+          return item.nombre === 'Lomo Saltado' || item.nombre === 'Sopa de Maní';
+        } else {
+          // CAFETERIA
+          return item.nombre === 'Café Americano' || item.nombre === 'Café con Leche' || item.nombre === 'Café Espresso' || item.nombre === 'Capuccino';
+        }
+      });
+
+      const itemsWithStock = filtered.map((item) => {
+        const recipe = itemRecetas[item.id] || [];
+        let hasSufficientStock = true;
+        if (recipe.length > 0) {
+          hasSufficientStock = recipe.every((r) => {
+            const currentStock = insumoMap.get(r.insumoId) || 0;
+            return currentStock >= r.qty;
+          });
+        }
+        return {
+          ...item,
+          hasStock: hasSufficientStock,
+        };
+      });
+
+      setProductos(itemsWithStock);
+    } catch (err: any) {
+      setErrorMsg('Error de conexión al cargar el menú.');
+    } finally {
+      setLoadingItems(false);
     }
+  };
+
+  useEffect(() => {
+    if (!rol || !giro) return;
     loadMenu();
+
+    const channel = supabase
+      .channel('pos-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inventario_insumos', filter: `empresa_id=eq.${empresaId}` },
+        () => {
+          loadMenu();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [rol, empresaId, giro]);
 
-  const addToCart = useCallback((item: ItemMenu) => {
+  const addToCart = useCallback((item: ItemMenu & { hasStock: boolean }) => {
+    if (!item.hasStock) return;
     setAddedId(item.id);
     setTimeout(() => setAddedId(null), 300);
     setCart((prev) => {
@@ -104,7 +162,7 @@ export default function PosPage() {
     try {
       const { data: pedidoData, error: pedidoError } = await supabase
         .from('pedidos')
-        .insert([{ empresa_id: 1, total: totalStr, estado: 'Pendiente' }])
+        .insert([{ empresa_id: empresaId, total: totalStr, estado: 'Pendiente' }])
         .select()
         .single();
       if (pedidoError) throw pedidoError;
@@ -128,98 +186,90 @@ export default function PosPage() {
     }
   };
 
-  if (!rol) return <div className="flex flex-1 items-center justify-center text-zinc-500">Cargando…</div>;
+  if (!rol) return <div className="flex flex-1 items-center justify-center text-[var(--text-dim)] bg-[var(--bg-base)]">Cargando…</div>;
 
   const currentTotal = calcularTotal();
   const totalItems = cart.reduce((s, ci) => s + ci.cantidad, 0);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-zinc-950 lg:flex-row">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--bg-base)] lg:flex-row">
       {/* ───── LEFT: Catalog ───── */}
-      <div className="flex flex-1 flex-col p-6 overflow-y-auto border-b border-white/[0.03] lg:border-b-0 lg:border-r">
+      <div className="flex flex-1 flex-col p-6 overflow-y-auto">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">Menú del día</h1>
-            <p className="text-[12px] text-zinc-500">Toca un producto para agregarlo al pedido</p>
+            <h1 className="text-[18px] font-medium text-[var(--text-primary)] tracking-tight">Menú del día</h1>
+            <p className="text-[12px] text-[var(--text-dim)] font-normal">Toca un producto para agregarlo al pedido</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="rounded-lg border border-white/[0.04] bg-white/[0.02] px-3 py-1.5 text-[11px] font-semibold text-zinc-400">
+            <span className="rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-muted)]">
               {productos.length} ítems
             </span>
           </div>
         </div>
 
         {errorMsg && (
-          <div className="mb-4 rounded-xl border border-rose-500/10 bg-rose-500/5 p-3 text-sm text-rose-400">{errorMsg}</div>
+          <div className="mb-4 rounded-[var(--radius-sm)] border-[0.5px] border-[var(--danger)] bg-[var(--bg-surface)] p-3 text-[12px] text-[var(--danger)] font-normal">
+            {errorMsg}
+          </div>
         )}
 
         {loadingItems ? (
           <div className="flex flex-1 items-center justify-center">
-            <div className="h-8 w-8 rounded-full border-[3px] border-zinc-800 border-t-indigo-500 animate-spin" />
+            <div className="h-6 w-6 border-2 border-[var(--border-default)] border-t-[var(--accent)] rounded-full animate-spin" />
           </div>
         ) : productos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center flex-1 py-20 rounded-2xl border border-dashed border-white/[0.04]">
-            <div className="text-4xl mb-3 opacity-30">
-              {giro === 'RESTAURANTE' ? '🍽️' : '☕'}
-            </div>
-            <p className="text-sm text-zinc-500">Menú vacío</p>
-            <p className="text-[11px] text-zinc-600 mt-1">Ejecuta el script SQL semilla en Supabase</p>
+          <div className="flex flex-col items-center justify-center flex-1 py-20 rounded-[var(--radius-lg)] border-[0.5px] border-dashed border-[var(--border-default)] bg-[var(--bg-card)]">
+            <p className="text-[13px] text-[var(--text-dim)] font-normal">Menú vacío</p>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {productos.map((prod) => {
-              const isJustAdded = addedId === prod.id;
               const inCart = cart.find((ci) => ci.item.id === prod.id);
-
-              const isRestaurante = giro === 'RESTAURANTE';
-              const icon = prod.nombre.includes('Lomo') ? '🥩' : prod.nombre.includes('Sopa') ? '🥣' : '☕';
-              const iconBg = isRestaurante
-                ? 'from-emerald-500/15 to-teal-500/5 text-emerald-400'
-                : 'from-amber-500/15 to-orange-500/5 text-amber-400';
-              const textHoverColor = isRestaurante
-                ? 'group-hover:text-emerald-300'
-                : 'group-hover:text-amber-300';
-              const btnHoverBg = isRestaurante
-                ? 'group-hover:bg-emerald-500'
-                : 'group-hover:bg-indigo-500';
+              const hasStock = prod.hasStock;
 
               return (
                 <button
                   key={prod.id}
-                  onClick={() => addToCart(prod)}
-                  className={`group relative flex flex-col justify-between rounded-2xl border p-5 text-left transition-all duration-200 ${
-                    isJustAdded
-                      ? 'border-emerald-500/30 bg-emerald-500/5 scale-[0.97]'
-                      : 'border-white/[0.04] bg-white/[0.015] hover:border-white/[0.08] hover:bg-white/[0.03]'
+                  onClick={() => hasStock && addToCart(prod)}
+                  disabled={!hasStock}
+                  className={`group relative flex flex-col justify-between rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] p-5 text-left transition-all duration-150 ${
+                    !hasStock
+                      ? 'opacity-40 cursor-not-allowed'
+                      : 'hover:border-[var(--accent)] active:scale-[0.98]'
                   }`}
                 >
                   {/* Cart badge */}
                   {inCart && (
-                    <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500 text-[11px] font-black text-white shadow-lg shadow-indigo-500/30 animate-count-up">
+                    <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-medium text-white shadow-none">
                       {inCart.cantidad}
                     </span>
                   )}
 
-                  <div>
-                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${iconBg} text-xl`}>
-                      {icon}
+                  {/* Header card info */}
+                  <div className="w-full">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-[15px] font-medium text-[var(--text-primary)] leading-tight">
+                        {prod.nombre}
+                      </h3>
+                      {!hasStock && (
+                        <span className="shrink-0 bg-[var(--danger)] text-white text-[9px] font-medium px-2 py-0.5 rounded-[var(--radius-sm)]">
+                          Sin stock
+                        </span>
+                      )}
                     </div>
-                    <h3 className={`text-[15px] font-bold text-white ${textHoverColor} transition-colors leading-tight`}>
-                      {prod.nombre}
-                    </h3>
                   </div>
 
-                  <div className="mt-4 flex items-end justify-between">
+                  <div className="mt-8 flex items-end justify-between w-full">
                     <div>
-                      <p className="text-[10px] uppercase tracking-widest text-zinc-600 font-semibold">Precio</p>
-                      <p className="text-lg font-extrabold text-white tracking-tight">{formatCurrency(prod.precio)}</p>
+                      <p className="text-[9px] uppercase tracking-wider text-[var(--text-dim)] font-normal">Precio</p>
+                      <p className="text-[16px] font-medium text-[var(--accent)] tracking-tight leading-none mt-1">{formatCurrency(prod.precio)}</p>
                     </div>
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-zinc-500 ${btnHoverBg} group-hover:text-white transition-all`}>
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                      </svg>
-                    </div>
+                    {hasStock && (
+                      <div className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] border-[0.5px] border-[var(--accent)] bg-transparent text-[var(--accent)] group-hover:bg-[var(--accent)] group-hover:text-white transition-all text-xs font-medium">
+                        +
+                      </div>
+                    )}
                   </div>
                 </button>
               );
@@ -229,19 +279,22 @@ export default function PosPage() {
       </div>
 
       {/* ───── RIGHT: Cart ───── */}
-      <div className="w-full lg:w-[380px] flex flex-col bg-zinc-950 border-t border-white/[0.03] lg:border-t-0">
+      <div className="w-full lg:w-[380px] flex flex-col bg-[var(--bg-surface)] border-l-[0.5px] border-[var(--border-default)]">
         {/* Cart Header */}
-        <div className="flex items-center justify-between border-b border-white/[0.04] px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-[15px] font-bold text-white">Detalle de Venta</h2>
+        <div className="flex items-center justify-between border-b-[0.5px] border-[var(--border-default)] px-6 py-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-[15px] font-medium text-[var(--text-primary)]">Detalle de Venta</h2>
             {totalItems > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-500/20 px-1.5 text-[10px] font-bold text-indigo-400">
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--accent-dark)] px-1.5 text-[10px] font-medium text-[var(--accent-light)]">
                 {totalItems}
               </span>
             )}
           </div>
           {cart.length > 0 && (
-            <button onClick={clearCart} className="text-[11px] font-semibold text-rose-400/70 hover:text-rose-400 transition-colors">
+            <button
+              onClick={clearCart}
+              className="text-[11px] font-medium text-[var(--danger)] bg-transparent hover:underline"
+            >
               Vaciar
             </button>
           )}
@@ -251,33 +304,44 @@ export default function PosPage() {
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {cart.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center py-16">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-white/[0.06] text-2xl text-zinc-700">
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
-                </svg>
-              </div>
-              <p className="mt-3 text-xs text-zinc-600">El carrito está vacío</p>
+              <p className="text-[12px] text-[var(--text-dim)] font-normal">El carrito está vacío</p>
             </div>
           ) : (
             <div className="space-y-2.5">
               {cart.map((ci) => {
                 const sub = multiplyDecimals(ci.item.precio, ci.cantidad, 2);
                 return (
-                  <div key={ci.item.id} className="flex items-center gap-3 rounded-xl border border-white/[0.03] bg-white/[0.015] p-3 animate-slide-up">
+                  <div
+                    key={ci.item.id}
+                    className="flex items-center gap-3 rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] p-3"
+                  >
                     <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-white truncate">{ci.item.nombre}</p>
-                      <p className="text-[11px] text-zinc-500">{formatCurrency(ci.item.precio)} c/u</p>
+                      <p className="text-[13px] font-medium text-[var(--text-primary)] truncate">{ci.item.nombre}</p>
+                      <p className="text-[11px] text-[var(--text-dim)] font-normal">{formatCurrency(ci.item.precio)} c/u</p>
                     </div>
-                    <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.04] bg-white/[0.02] px-1 py-0.5">
-                      <button onClick={() => subtractFromCart(ci.item.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-white transition-all text-sm font-bold">
+                    
+                    {/* Cantidad controles */}
+                    <div className="flex items-center gap-1.5 rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-1 py-0.5">
+                      <button
+                        onClick={() => subtractFromCart(ci.item.id)}
+                        className="flex h-5 w-5 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] text-sm font-medium"
+                      >
                         −
                       </button>
-                      <span className="w-5 text-center text-[12px] font-bold text-white">{ci.cantidad}</span>
-                      <button onClick={() => addToCart(ci.item)} className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-white transition-all text-sm font-bold">
+                      <span className="w-4 text-center text-[12px] font-medium text-[var(--text-primary)]">{ci.cantidad}</span>
+                      <button
+                        onClick={() => {
+                          const prodStock = productos.find(p => p.id === ci.item.id);
+                          if (prodStock && prodStock.hasStock) {
+                            addToCart(prodStock);
+                          }
+                        }}
+                        className="flex h-5 w-5 items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] text-sm font-medium"
+                      >
                         +
                       </button>
                     </div>
-                    <span className="text-[13px] font-bold text-white w-20 text-right">{formatCurrency(sub)}</span>
+                    <span className="text-[13px] font-medium text-[var(--text-primary)] w-20 text-right">{formatCurrency(sub)}</span>
                   </div>
                 );
               })}
@@ -286,29 +350,17 @@ export default function PosPage() {
         </div>
 
         {/* Cart Footer */}
-        <div className="border-t border-white/[0.04] bg-zinc-950 px-6 py-5 space-y-4">
+        <div className="border-t-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-5 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-zinc-400 font-medium">Total</span>
-            <span className="text-2xl font-extrabold text-white tracking-tight">{formatCurrency(currentTotal)}</span>
+            <span className="text-[13px] text-[var(--text-muted)] font-normal">Total</span>
+            <span className="text-[20px] font-medium text-[var(--accent)] tracking-tight">{formatCurrency(currentTotal)}</span>
           </div>
           <button
             onClick={handleGenerateOrder}
             disabled={cart.length === 0 || submittingOrder}
-            className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-3.5 font-bold text-white shadow-xl shadow-indigo-500/20 transition-all hover:shadow-indigo-500/30 hover:brightness-110 active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
+            className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] py-3.5 font-medium text-white text-[13px] transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed shadow-none"
           >
-            {submittingOrder ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                Procesando…
-              </span>
-            ) : (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Generar Pedido
-              </span>
-            )}
+            {submittingOrder ? 'Procesando…' : 'Confirmar pedido'}
           </button>
         </div>
       </div>
