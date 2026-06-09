@@ -143,11 +143,12 @@ export default function SuperAdminPage() {
 
   useEffect(() => {
     if (rol !== 'SuperAdmin') return;
-
     fetchEmpresas();
-    loadTickets();
-    loadMetrics();
+  }, [rol, fetchEmpresas]);
 
+  useEffect(() => {
+    if (rol !== 'SuperAdmin') return;
+    loadTickets();
     const channel = supabase
       .channel('superadmin-tickets-rt')
       .on(
@@ -162,7 +163,12 @@ export default function SuperAdminPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [rol, fetchEmpresas, loadTickets, loadMetrics]);
+  }, [rol, loadTickets]);
+
+  useEffect(() => {
+    if (rol !== 'SuperAdmin') return;
+    loadMetrics();
+  }, [rol, loadMetrics]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -255,20 +261,24 @@ export default function SuperAdminPage() {
 
     setSubmittingUser(true);
     try {
-      const { data: authData, error: authErr } = await supabase.auth.signUp({
-        email: userEmail.trim(),
-        password: userPassword.trim(),
+      const res = await fetch('/api/superadmin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: userEmail.trim(),
+          password: userPassword.trim(),
+          nombre: userNombre.trim(),
+          rol: userRol,
+          empresaId: userEmpresaId,
+        }),
       });
-      if (authErr) throw authErr;
-      if (!authData.user) throw new Error('No se pudo crear el usuario de autenticación.');
 
-      const { error: profileErr } = await supabase.from('usuarios').insert({
-        id: authData.user.id,
-        empresa_id: parseInt(userEmpresaId),
-        nombre: userNombre.trim(),
-        rol: userRol,
-      });
-      if (profileErr) throw profileErr;
+      const resData = await res.json();
+      if (!res.ok) {
+        throw new Error(resData.error || 'Error al registrar el usuario.');
+      }
 
       showToast('success', `Usuario "${userNombre}" (${userRol}) creado y vinculado a empresa #${userEmpresaId}.`);
       setUserEmail('');
