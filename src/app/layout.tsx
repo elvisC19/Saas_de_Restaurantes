@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SaaS Gastronómico - Café Central Sucre",
+  title: "GastroLedger",
   description: "Sistema Multi-tenant de Punto de Venta y Gestión de Inventarios",
 };
 
