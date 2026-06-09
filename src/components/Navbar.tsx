@@ -6,8 +6,11 @@ import { useAuth } from '@/context/AuthContext';
 
 const navLinks = [
   { href: '/pos', label: 'Punto de Venta', icon: '◉', roles: ['Administrador', 'Cajero'] },
+  { href: '/mesas', label: 'Plano de Mesas', icon: '⧇', roles: ['Administrador', 'Cajero'] },
+  { href: '/pos/closure', label: 'Cierre de Caja', icon: '🔒', roles: ['Administrador', 'Cajero'] },
   { href: '/cocina', label: 'Cocina KDS', icon: '◎', roles: ['Administrador', 'Cocina'] },
   { href: '/admin', label: 'Dashboard', icon: '◈', roles: ['Administrador'] },
+  { href: '/admin/reports', label: 'Reportes', icon: '📊', roles: ['Administrador'] },
   { href: '/superadmin', label: 'Super Admin', icon: '✦', roles: ['SuperAdmin'] },
 ];
 

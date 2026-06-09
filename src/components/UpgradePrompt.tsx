@@ -3,7 +3,17 @@
 import React, { useState } from 'react';
 import { formatCurrency } from '@/lib/math';
 
-export default function UpgradePrompt() {
+interface UpgradePromptProps {
+  title?: string;
+  message?: string;
+  requiredPlan?: 'Medio' | 'Premium';
+}
+
+export default function UpgradePrompt({
+  title = 'Función Restringida',
+  message = 'El control físico de materias primas y monitor de inventario está disponible a partir del Plan Medio.',
+  requiredPlan = 'Medio'
+}: UpgradePromptProps = {}) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const plans = [
@@ -28,7 +38,7 @@ export default function UpgradePrompt() {
         'Pantalla de Cocina KDS en tiempo real',
         'Monitor de inventarios físico de materias primas'
       ],
-      border: 'border-[var(--accent-dark)] bg-[var(--bg-surface)]',
+      border: requiredPlan === 'Medio' ? 'border-[var(--accent-dark)] bg-[var(--bg-surface)]' : 'border-[var(--border-default)] bg-[var(--bg-surface)]',
       badge: 'Popular',
       badgeClass: 'text-[var(--accent-light)] border-[var(--border-default)] bg-[var(--accent-dark)]'
     },
@@ -42,21 +52,21 @@ export default function UpgradePrompt() {
         'Control de tenants ilimitado',
         'Auditoría y soporte prioritario 24/7'
       ],
-      border: 'border-[var(--border-default)] bg-[var(--bg-surface)]',
+      border: requiredPlan === 'Premium' ? 'border-[var(--accent-dark)] bg-[var(--bg-surface)]' : 'border-[var(--border-default)] bg-[var(--bg-surface)]',
       badge: 'Elite',
       badgeClass: 'text-[var(--accent-light)] border-[var(--border-default)] bg-[var(--accent-dark)]'
     }
   ];
 
   return (
-    <div className="flex flex-col items-center justify-center text-center p-8 border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] rounded-[var(--radius-lg)] py-14 max-w-2xl mx-auto">
+    <div className="flex flex-col items-center justify-center text-center p-8 border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] rounded-[var(--radius-lg)] py-14 max-w-2xl mx-auto w-full">
       {/* Icon lock */}
       <div className="flex h-12 w-12 items-center justify-center rounded-[var(--radius-md)] border-[0.5px] border-[var(--danger)] bg-[var(--bg-surface)] text-[var(--danger)] text-lg mb-4">
         🔒
       </div>
-      <h3 className="text-[16px] font-medium text-white tracking-wide">Función Restringida</h3>
+      <h3 className="text-[16px] font-medium text-white tracking-wide">{title}</h3>
       <p className="text-[var(--text-dim)] text-[12px] mt-1.5 max-w-sm leading-relaxed font-normal">
-        El control físico de materias primas y monitor de inventario está disponible a partir del **Plan Medio**.
+        {message}
       </p>
       
       <button

@@ -76,3 +76,32 @@ export interface DetallePedidoConMenu extends DetallePedido {
 export interface PedidoConDetalles extends Pedido {
   detalle_pedidos: DetallePedidoConMenu[];
 }
+
+export interface Mesa {
+  id: number;
+  empresa_id: number;
+  numero_mesa: number;
+  estado: 'Libre' | 'Ocupada' | 'Sucia';
+  capacidad: number;
+  unificada_con: number | null;
+  creado_at?: string;
+}
+
+export interface MesaConConsumo extends Mesa {
+  consumo_acumulado: string;
+}
+
+export interface TurnoPersonal {
+  id: number;
+  empresa_id: number;
+  usuario_id: string;
+  fecha_apertura: string;
+  fecha_cierre: string | null;
+  monto_apertura: string;
+  monto_cierre: string | null;
+  ventas_calculadas: string;
+  notas_caja: string | null;
+  estado: 'Abierto' | 'Cerrado';
+}
+
+

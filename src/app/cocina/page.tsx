@@ -6,7 +6,13 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { PedidoConDetalles, EstadoPedido } from '@/types/database';
 
-function ElapsedTimer({ createdAt }: { createdAt: string }) {
+// Pedido extendido para soportar prioridad y mesa en TypeScript
+interface PedidoKDS extends PedidoConDetalles {
+  numero_mesa?: number;
+  prioridad?: 'Alta' | 'Media' | 'Baja';
+}
+
+function ElapsedTimer({ createdAt, giro }: { createdAt: string; giro: 'CAFETERIA' | 'RESTAURANTE' }) {
   const [elapsed, setElapsed] = useState('0:00');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -23,7 +29,14 @@ function ElapsedTimer({ createdAt }: { createdAt: string }) {
   }, [createdAt]);
 
   const mins = parseInt(elapsed.split(':')[0]);
-  const color = mins >= 10 ? 'text-[var(--danger)]' : mins >= 5 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]';
+  
+  // Cafetería cambia a ámbar a los 3 min. Restaurante a los 5 min (ámbar) y 10 min (rojo).
+  let color = 'text-[var(--text-dim)]';
+  if (giro === 'CAFETERIA') {
+    color = mins >= 3 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]';
+  } else {
+    color = mins >= 10 ? 'text-[var(--danger)]' : mins >= 5 ? 'text-[var(--warn)]' : 'text-[var(--text-dim)]';
+  }
 
   return <span className={`font-mono text-[12px] font-medium ${color}`}>{elapsed}</span>;
 }
@@ -31,7 +44,7 @@ function ElapsedTimer({ createdAt }: { createdAt: string }) {
 export default function CocinaPage() {
   const { rol, empresaId, giro } = useAuth();
   const router = useRouter();
-  const [pedidos, setPedidos] = useState<PedidoConDetalles[]>([]);
+  const [pedidos, setPedidos] = useState<PedidoKDS[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -86,22 +99,47 @@ export default function CocinaPage() {
     }
   };
 
+  const handleUpdatePrioridad = async (pedidoId: number, newPrioridad: 'Alta' | 'Media' | 'Baja') => {
+    try {
+      const { error } = await supabase
+        .from('pedidos')
+        .update({ prioridad: newPrioridad })
+        .eq('id', pedidoId);
+      if (error) throw error;
+      await loadActiveOrders();
+    } catch (err) {
+      console.error('Error al actualizar prioridad:', err);
+    }
+  };
+
+  const getCookingTime = (nombre: string): string => {
+    if (nombre.includes('Lomo')) return '15 min';
+    if (nombre.includes('Sopa')) return '10 min';
+    return '3 min';
+  };
+
+  const getPriorityColor = (prio: 'Alta' | 'Media' | 'Baja') => {
+    if (prio === 'Alta') return 'text-[var(--danger)] border-[var(--danger)] bg-[var(--danger)]/5';
+    if (prio === 'Baja') return 'text-[var(--text-dim)] border-[var(--border-default)]';
+    return 'text-[var(--warn)] border-[var(--warn)] bg-[var(--warn)]/5';
+  };
+
   const pendientes = pedidos.filter((p) => p.estado === 'Pendiente');
   const enPreparacion = pedidos.filter((p) => p.estado === 'En Preparación');
   const listos = pedidos.filter((p) => p.estado === 'Listo');
 
-  if (!rol) return <div className="flex flex-1 items-center justify-center text-[var(--text-dim)] bg-[var(--bg-base)]">Cargando…</div>;
+  if (!rol || !giro) return <div className="flex flex-1 items-center justify-center text-[var(--text-dim)] bg-[var(--bg-base)]">Cargando…</div>;
 
   const columns: {
     title: string;
-    data: PedidoConDetalles[];
+    data: PedidoKDS[];
     leftBorderColor: string;
     btnLabel: string;
     showBtn: boolean;
     statusBadge?: string;
   }[] = [
     {
-      title: 'NUEVOS PEDIDOS',
+      title: giro === 'CAFETERIA' ? 'BEBIDAS NUEVAS' : 'NUEVOS PEDIDOS',
       data: pendientes,
       leftBorderColor: 'border-l-[var(--accent)]',
       btnLabel: 'Iniciar Preparación',
@@ -120,7 +158,7 @@ export default function CocinaPage() {
       leftBorderColor: 'border-l-[#5DCAA5]',
       btnLabel: '',
       showBtn: false,
-      statusBadge: 'Esperando cobro en caja',
+      statusBadge: 'Esperando cobro',
     },
   ];
 
@@ -130,12 +168,12 @@ export default function CocinaPage() {
       <div className="border-b-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-6 py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-[18px] font-medium text-white tracking-tight flex items-center gap-2">
-            Kitchen Display System
+            KDS · {giro === 'CAFETERIA' ? 'Barra de Cafetería' : 'Cocina de Restaurante'}
             <span className="flex items-center gap-1.5 rounded-full border-[0.5px] border-[var(--accent)] bg-[var(--accent-dark)] px-2.5 py-0.5 text-[10px] font-medium text-[var(--accent-light)]">
               LIVE
             </span>
           </h1>
-          <p className="text-[11px] text-[var(--text-dim)] font-normal">Las órdenes llegan automáticamente por Supabase Realtime</p>
+          <p className="text-[11px] text-[var(--text-dim)] font-normal">Sincronización en tiempo real con el terminal de ventas</p>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
           <span className="flex items-center gap-1 font-normal"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" /> {pendientes.length} Nuevos</span>
@@ -171,24 +209,38 @@ export default function CocinaPage() {
                   col.data.map((ped) => (
                     <div
                       key={ped.id}
-                      className={`rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] border-l-[2px] ${col.leftBorderColor} overflow-hidden transition-all`}
+                      className={`rounded-[var(--radius-md)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-card)] border-l-[2px] ${col.leftBorderColor} overflow-hidden`}
                     >
                       {/* Card Header */}
                       <div className="flex items-center justify-between px-4 py-2.5 border-b-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)]">
-                        <span className="text-[13px] font-medium text-[var(--text-primary)]">#{ped.id}</span>
                         <div className="flex items-center gap-2">
-                          <ElapsedTimer createdAt={ped.creado_at || new Date().toISOString()} />
+                          <span className="text-[13px] font-medium text-[var(--text-primary)]">#{ped.id}</span>
+                          {giro === 'RESTAURANTE' && ped.numero_mesa && (
+                            <span className="rounded bg-[var(--accent-dark)] px-2 py-0.5 text-[10px] font-medium text-[var(--accent-light)]">
+                              Mesa {ped.numero_mesa}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <ElapsedTimer createdAt={ped.creado_at || new Date().toISOString()} giro={giro} />
                           <span className="text-[10px] text-[var(--text-dim)] font-normal">
                             {new Date(ped.creado_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
                       </div>
 
-                      {/* Card Body — Items */}
+                      {/* Card Body — Items + Cooking Times */}
                       <div className="px-4 py-3 space-y-1.5">
                         {ped.detalle_pedidos?.map((det: any) => (
-                          <div key={det.id} className="flex items-center justify-between">
-                            <span className="text-[12px] text-[var(--text-muted)] font-normal">{det.items_menu?.nombre}</span>
+                          <div key={det.id} className="flex items-center justify-between gap-1.5">
+                            <div className="flex flex-col">
+                              <span className="text-[12px] text-[var(--text-primary)] font-normal">{det.items_menu?.nombre}</span>
+                              {giro === 'RESTAURANTE' && (
+                                <span className="text-[10px] text-[var(--text-dim)] font-normal">
+                                  Cocción est: {getCookingTime(det.items_menu?.nombre)}
+                                </span>
+                              )}
+                            </div>
                             <span className="flex h-5 min-w-5 items-center justify-center rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-1.5 text-[10px] font-medium text-[var(--text-primary)]">
                               ×{det.cantidad}
                             </span>
@@ -196,8 +248,23 @@ export default function CocinaPage() {
                         ))}
                       </div>
 
-                      {/* Card Footer — Action */}
-                      <div className="px-4 py-2.5 border-t-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)]">
+                      {/* Card Footer — Action + Priority */}
+                      <div className="px-4 py-2.5 border-t-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] flex flex-col gap-2">
+                        {giro === 'RESTAURANTE' && (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[9px] font-medium text-[var(--text-dim)] uppercase tracking-wider">Prioridad:</span>
+                            <select
+                              value={ped.prioridad || 'Media'}
+                              onChange={(e) => handleUpdatePrioridad(ped.id, e.target.value as any)}
+                              className={`rounded-[var(--radius-sm)] border-[0.5px] px-2 py-0.5 text-[10px] font-medium outline-none bg-zinc-950 ${getPriorityColor(ped.prioridad || 'Media')}`}
+                            >
+                              <option value="Alta">Alta 🔴</option>
+                              <option value="Media">Media 🟡</option>
+                              <option value="Baja">Baja ⚪</option>
+                            </select>
+                          </div>
+                        )}
+
                         {col.showBtn ? (
                           <button
                             onClick={() => avanzarEstado(ped.id, ped.estado)}

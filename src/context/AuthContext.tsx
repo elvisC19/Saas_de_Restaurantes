@@ -15,7 +15,7 @@ interface AuthContextType {
   setGiro: (giro: 'CAFETERIA' | 'RESTAURANTE' | null) => void;
   setEmpresaId: (id: number) => void;
   loading: boolean;
-  login: (email: string, password: string) => Promise<{ rol: RolUsuario; giro: 'CAFETERIA' | 'RESTAURANTE'; empresaId: number }>;
+  login: (email: string, password: string, selectedRol: RolUsuario, selectedGiro: 'CAFETERIA' | 'RESTAURANTE') => Promise<{ rol: RolUsuario; giro: 'CAFETERIA' | 'RESTAURANTE'; empresaId: number }>;
   logout: () => Promise<void>;
 }
 
@@ -89,13 +89,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) throw error;
 
         if (session?.user && active) {
-          const data = await fetchSessionData(session.user.id);
-          if (data && active) {
-            setRolState(data.rol);
-            setGiroState(data.giro);
-            setEmpresaIdState(data.empresaId);
-            setEmpresaNombreState(data.empresaNombre);
-            setPlanState(data.plan);
+          const storedRol = localStorage.getItem('rol') as RolUsuario | null;
+          const storedGiro = localStorage.getItem('giro') as 'CAFETERIA' | 'RESTAURANTE' | null;
+          const storedEmpresaId = localStorage.getItem('empresaId');
+
+          if (storedRol && storedGiro && storedEmpresaId && active) {
+            setRolState(storedRol);
+            setGiroState(storedGiro);
+            setEmpresaIdState(Number(storedEmpresaId));
+
+            const { data: empData } = await supabase
+              .from('empresas')
+              .select('plan_mensual, nombre')
+              .eq('id', Number(storedEmpresaId))
+              .single();
+
+            if (empData && active) {
+              setEmpresaNombreState(empData.nombre);
+              setPlanState(derivePlan(empData.plan_mensual));
+            }
+          } else {
+            const data = await fetchSessionData(session.user.id);
+            if (data && active) {
+              setRolState(data.rol);
+              setGiroState(data.giro);
+              setEmpresaIdState(data.empresaId);
+              setEmpresaNombreState(data.empresaNombre);
+              setPlanState(data.plan);
+            }
           }
         }
       } catch (err) {
@@ -114,13 +135,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       if (session?.user) {
         try {
-          const data = await fetchSessionData(session.user.id);
-          if (data && active) {
-            setRolState(data.rol);
-            setGiroState(data.giro);
-            setEmpresaIdState(data.empresaId);
-            setEmpresaNombreState(data.empresaNombre);
-            setPlanState(data.plan);
+          const storedRol = localStorage.getItem('rol') as RolUsuario | null;
+          const storedGiro = localStorage.getItem('giro') as 'CAFETERIA' | 'RESTAURANTE' | null;
+          const storedEmpresaId = localStorage.getItem('empresaId');
+
+          if (storedRol && storedGiro && storedEmpresaId && active) {
+            setRolState(storedRol);
+            setGiroState(storedGiro);
+            setEmpresaIdState(Number(storedEmpresaId));
+
+            const { data: empData } = await supabase
+              .from('empresas')
+              .select('plan_mensual, nombre')
+              .eq('id', Number(storedEmpresaId))
+              .single();
+
+            if (empData && active) {
+              setEmpresaNombreState(empData.nombre);
+              setPlanState(derivePlan(empData.plan_mensual));
+            }
+          } else {
+            const data = await fetchSessionData(session.user.id);
+            if (data && active) {
+              setRolState(data.rol);
+              setGiroState(data.giro);
+              setEmpresaIdState(data.empresaId);
+              setEmpresaNombreState(data.empresaNombre);
+              setPlanState(data.plan);
+            }
           }
         } catch (err) {
           console.error('Error al cargar perfil tras cambio de estado:', err);
@@ -140,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, selectedRol: RolUsuario, selectedGiro: 'CAFETERIA' | 'RESTAURANTE') => {
     const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -150,30 +192,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!authData.user) throw new Error('No se pudo autenticar el usuario.');
 
     try {
-      const data = await fetchSessionData(authData.user.id);
-      if (!data) {
-        throw new Error('No se pudo recuperar el perfil o empresa asociada de este usuario.');
+      setRolState(selectedRol);
+      setGiroState(selectedGiro);
+      setEmpresaIdState(1); // Empresa fija en 1 para la simulación de entorno del onboarding
+
+      localStorage.setItem('rol', selectedRol);
+      localStorage.setItem('giro', selectedGiro);
+      localStorage.setItem('empresaId', '1');
+
+      const { data: empData } = await supabase
+        .from('empresas')
+        .select('plan_mensual, nombre')
+        .eq('id', 1)
+        .single();
+
+      if (empData) {
+        setEmpresaNombreState(empData.nombre);
+        setPlanState(derivePlan(empData.plan_mensual));
       }
-      
-      setRolState(data.rol);
-      setGiroState(data.giro);
-      setEmpresaIdState(data.empresaId);
-      setEmpresaNombreState(data.empresaNombre);
-      setPlanState(data.plan);
 
       return {
-        rol: data.rol,
-        giro: data.giro,
-        empresaId: data.empresaId
+        rol: selectedRol,
+        giro: selectedGiro,
+        empresaId: 1
       };
     } catch (err) {
       await supabase.auth.signOut();
+      localStorage.removeItem('rol');
+      localStorage.removeItem('giro');
+      localStorage.removeItem('empresaId');
       throw err;
     }
   };
 
   const logout = async () => {
     await supabase.auth.signOut();
+    localStorage.removeItem('rol');
+    localStorage.removeItem('giro');
+    localStorage.removeItem('empresaId');
     setRolState(null);
     setGiroState(null);
     setEmpresaIdState(1);
@@ -181,9 +237,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setPlanState(null);
   };
 
-  const setRol = (nuevoRol: RolUsuario | null) => setRolState(nuevoRol);
-  const setGiro = (nuevoGiro: 'CAFETERIA' | 'RESTAURANTE' | null) => setGiroState(nuevoGiro);
-  const setEmpresaId = (nuevaEmpresaId: number) => setEmpresaIdState(nuevaEmpresaId);
+  const setRol = (nuevoRol: RolUsuario | null) => {
+    setRolState(nuevoRol);
+    if (nuevoRol) localStorage.setItem('rol', nuevoRol);
+    else localStorage.removeItem('rol');
+  };
+  
+  const setGiro = (nuevoGiro: 'CAFETERIA' | 'RESTAURANTE' | null) => {
+    setGiroState(nuevoGiro);
+    if (nuevoGiro) localStorage.setItem('giro', nuevoGiro);
+    else localStorage.removeItem('giro');
+  };
+
+  const setEmpresaId = (nuevaEmpresaId: number) => {
+    setEmpresaIdState(nuevaEmpresaId);
+    localStorage.setItem('empresaId', String(nuevaEmpresaId));
+  };
 
   return (
     <AuthContext.Provider

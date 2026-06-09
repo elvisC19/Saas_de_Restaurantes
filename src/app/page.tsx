@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { RolUsuario } from '@/types/database';
 
 export default function HomePage() {
   const { rol, giro, login, loading: authLoading } = useAuth();
@@ -10,10 +11,13 @@ export default function HomePage() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [selectedGiro, setSelectedGiro] = useState<'CAFETERIA' | 'RESTAURANTE'>('CAFETERIA');
+  const [selectedRol, setSelectedRol] = useState<RolUsuario>('Cajero');
+  
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Redirigir automáticamente si ya hay sesión activa
+  // Redirigir si ya hay sesión activa
   useEffect(() => {
     if (!authLoading && rol && giro) {
       const target = rol === 'Administrador' ? '/admin' : rol === 'Cajero' ? '/pos' : '/cocina';
@@ -30,7 +34,7 @@ export default function HomePage() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const data = await login(email, password);
+      const data = await login(email, password, selectedRol, selectedGiro);
       const target = data.rol === 'Administrador' ? '/admin' : data.rol === 'Cajero' ? '/pos' : '/cocina';
       router.push(target);
     } catch (err: any) {
@@ -66,48 +70,99 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Píldoras de Giro (Decorativas no interactivas) */}
-        <div className="flex gap-2 justify-center mb-6">
-          <div className="rounded-full px-3.5 py-1 text-[12px] font-medium bg-[var(--accent-dark)] text-[var(--accent-light)] border-[0.5px] border-[var(--border-default)]">
-            ☕ Cafetería
-          </div>
-          <div className="rounded-full px-3.5 py-1 text-[12px] font-medium bg-[var(--bg-surface)] text-[var(--text-muted)] border-[0.5px] border-[var(--border-default)] opacity-60">
-            🍽️ Restaurante
-          </div>
-        </div>
-
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Selector Obligatorio de Giro */}
           <div>
-            <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-1.5">
-              Correo Electrónico
+            <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-2">
+              Giro Comercial
             </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="ejemplo@gastroledger.com"
-              className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-dim)] outline-none transition-all focus:border-[var(--accent)]"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSelectedGiro('CAFETERIA')}
+                className={`flex flex-col items-center justify-center p-3 rounded-[var(--radius-sm)] border-[0.5px] transition-all text-[12px] font-medium ${
+                  selectedGiro === 'CAFETERIA'
+                    ? 'border-[var(--accent)] bg-[var(--accent-dark)] text-white'
+                    : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)]'
+                }`}
+              >
+                <span className="text-base mb-1">☕</span>
+                <span>Cafetería</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedGiro('RESTAURANTE')}
+                className={`flex flex-col items-center justify-center p-3 rounded-[var(--radius-sm)] border-[0.5px] transition-all text-[12px] font-medium ${
+                  selectedGiro === 'RESTAURANTE'
+                    ? 'border-[var(--accent)] bg-[var(--accent-dark)] text-white'
+                    : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)]'
+                }`}
+              >
+                <span className="text-base mb-1">🍽️</span>
+                <span>Restaurante</span>
+              </button>
+            </div>
           </div>
 
+          {/* Selector de Rol */}
           <div>
-            <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-1.5">
-              Contraseña
+            <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-2">
+              Rol de Acceso
             </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-dim)] outline-none transition-all focus:border-[var(--accent)]"
-            />
+            <div className="grid grid-cols-3 gap-1.5">
+              {(['Cajero', 'Cocina', 'Administrador'] as RolUsuario[]).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setSelectedRol(r)}
+                  className={`py-2 px-1 text-[11px] rounded-[var(--radius-sm)] border-[0.5px] transition-all font-normal ${
+                    selectedRol === r
+                      ? 'border-[var(--accent)] bg-[var(--accent-dark)] text-white font-medium'
+                      : 'border-[var(--border-default)] bg-[var(--bg-surface)] text-[var(--text-muted)]'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Credenciales */}
+          <div className="space-y-3 pt-1">
+            <div>
+              <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-1.5">
+                Correo Electrónico
+              </label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="ejemplo@gastroledger.com"
+                className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-dim)] outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] block mb-1.5">
+                Contraseña
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-[var(--border-default)] bg-[var(--bg-surface)] px-4 py-2.5 text-[13px] text-[var(--text-primary)] placeholder-[var(--text-dim)] outline-none focus:border-[var(--accent)]"
+              />
+            </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] py-3 text-[13px] font-medium text-white transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] py-3.5 text-[13px] font-medium text-white transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-40"
           >
             {loading ? 'Validando...' : 'Ingresar'}
           </button>

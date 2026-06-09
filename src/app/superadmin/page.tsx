@@ -4,22 +4,45 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { Empresa } from '@/types/database';
 import { formatCurrency } from '@/lib/math';
+
+interface SuperAdminEmpresa {
+  id: number;
+  nombre: string;
+  plan_mensual: string;
+  plan_suscripcion?: 'Basico' | 'Medio' | 'Premium';
+  estado_cuenta?: 'Activo' | 'Suspendido' | 'Demo';
+  subdominio?: string;
+  total_licencias?: number;
+  nit?: string;
+  creado_at?: string;
+}
+
+interface SaaSMetrics {
+  totalTenants: number;
+  activeTenants: number;
+  mrr: number;
+  gmv: number;
+}
 
 export default function SuperAdminPage() {
   const { rol, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  const [empresas, setEmpresas] = useState<Empresa[]>([]);
+  const [empresas, setEmpresas] = useState<SuperAdminEmpresa[]>([]);
+  const [metrics, setMetrics] = useState<SaaSMetrics>({
+    totalTenants: 0,
+    activeTenants: 0,
+    mrr: 0,
+    gmv: 0,
+  });
   const [loadingList, setLoadingList] = useState(true);
 
   // Form State
   const [nombre, setNombre] = useState('');
-  const [giro, setGiro] = useState<'CAFETERIA' | 'RESTAURANTE'>('CAFETERIA');
+  const [nit, setNit] = useState('');
+  const [subdomain, setSubdomain] = useState('');
   const [plan, setPlan] = useState<'Basico' | 'Medio' | 'Premium'>('Basico');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -33,7 +56,6 @@ export default function SuperAdminPage() {
   }, [rol, authLoading, router]);
 
   const loadEmpresas = async () => {
-    setLoadingList(true);
     try {
       const { data, error } = await supabase
         .from('empresas')
@@ -49,16 +71,34 @@ export default function SuperAdminPage() {
     }
   };
 
+  const loadMetrics = async () => {
+    try {
+      const res = await fetch('/api/superadmin/metrics');
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMetrics({
+          totalTenants: data.totalTenants,
+          activeTenants: data.activeTenants,
+          mrr: data.mrr,
+          gmv: data.gmv,
+        });
+      }
+    } catch (err) {
+      console.error('Error al cargar métricas de SaaS:', err);
+    }
+  };
+
   useEffect(() => {
     if (rol === 'SuperAdmin') {
       loadEmpresas();
+      loadMetrics();
     }
   }, [rol]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreateTenant = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombre || !email || !password) {
-      setErrorMsg('Por favor completa todos los campos requeridos.');
+    if (!nombre || !nit) {
+      setErrorMsg('Por favor completa los campos obligatorios.');
       return;
     }
     setSubmitting(true);
@@ -66,38 +106,70 @@ export default function SuperAdminPage() {
     setSuccessMsg(null);
 
     try {
-      const res = await fetch('/api/superadmin/create-tenant', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          nombre,
-          giro,
-          plan,
-          email,
-          password,
-        }),
-      });
+      const computedSubdomain = subdomain.trim() || nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const planVal = plan === 'Premium' ? 450.00 : plan === 'Medio' ? 280.00 : 140.00;
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Fallo al crear la empresa.');
-      }
+      const { error } = await supabase
+        .from('empresas')
+        .insert({
+          nombre: nombre.trim(),
+          nit: nit.trim(),
+          subdominio: computedSubdomain,
+          plan_suscripcion: plan,
+          estado_cuenta: 'Activo',
+          plan_mensual: planVal
+        });
+
+      if (error) throw error;
 
       setSuccessMsg(`Empresa "${nombre}" registrada con éxito.`);
       setNombre('');
-      setEmail('');
-      setPassword('');
+      setNit('');
+      setSubdomain('');
       setPlan('Basico');
-      setGiro('CAFETERIA');
       
-      // Recargar lista
-      loadEmpresas();
+      await loadEmpresas();
+      await loadMetrics();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error de red.');
+      setErrorMsg(err.message || 'Error al crear la empresa.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleUpdatePlan = async (id: number, newPlan: 'Basico' | 'Medio' | 'Premium') => {
+    try {
+      const planVal = newPlan === 'Premium' ? 450.00 : newPlan === 'Medio' ? 280.00 : 140.00;
+      const { error } = await supabase
+        .from('empresas')
+        .update({
+          plan_suscripcion: newPlan,
+          plan_mensual: planVal
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadEmpresas();
+      await loadMetrics();
+    } catch (err: any) {
+      console.error('Error al mutar plan en caliente:', err);
+    }
+  };
+
+  const handleUpdateEstado = async (id: number, newEstado: 'Activo' | 'Suspendido' | 'Demo') => {
+    try {
+      const { error } = await supabase
+        .from('empresas')
+        .update({
+          estado_cuenta: newEstado
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadEmpresas();
+      await loadMetrics();
+    } catch (err: any) {
+      console.error('Error al mutar estado de cuenta en caliente:', err);
     }
   };
 
@@ -105,8 +177,8 @@ export default function SuperAdminPage() {
     return (
       <div className="flex flex-1 items-center justify-center min-h-screen bg-zinc-950 text-zinc-500">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 rounded-full border-[3px] border-zinc-800 border-t-purple-500 animate-spin" />
-          <span className="text-xs">Verificando credenciales de SuperAdmin...</span>
+          <div className="h-6 w-6 border-2 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
+          <span className="text-[12px] font-normal">Verificando credenciales de SuperAdmin...</span>
         </div>
       </div>
     );
@@ -116,192 +188,212 @@ export default function SuperAdminPage() {
     <div className="flex flex-1 flex-col bg-zinc-950 overflow-y-auto">
       <div className="mx-auto w-full max-w-6xl p-6 lg:p-8 space-y-6">
         
-        {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-white/[0.04] pb-5">
+        {/* Header con Indicador de Red Activo */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b-[0.5px] border-zinc-800 pb-5">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              Panel de Control SuperAdmin
-              <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-0.5 text-[10px] font-bold text-purple-400 uppercase tracking-wider">
-                SaaS Owner
+            <h1 className="text-[20px] font-medium text-white tracking-tight flex items-center gap-2">
+              Consola Maestra Global
+              <span className="rounded-full border-[0.5px] border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-medium text-emerald-400 uppercase tracking-wider">
+                SuperAdmin
               </span>
             </h1>
-            <p className="text-[12px] text-zinc-500 mt-0.5">Gestión global de inquilinos (Tenants), planes de facturación y giros comerciales</p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {/* Indicador de Red Activo con ping animado doble */}
+            <div className="flex items-center gap-2 rounded-full border-[0.5px] border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-[11px] font-normal text-emerald-400">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              <span>Red Activa</span>
+            </div>
+            
+            <button 
+              onClick={() => { loadEmpresas(); loadMetrics(); }}
+              className="rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:text-white transition-all"
+            >
+              Actualizar Consola
+            </button>
           </div>
         </div>
 
-        {/* Dos columnas principales */}
+        {/* Grid de KPIs SuperAdmin */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: 'Inquilinos Totales', value: `${metrics.totalTenants}` },
+            { label: 'Suscripciones Activas', value: `${metrics.activeTenants}` },
+            { label: 'MRR Consolidado', value: formatCurrency(metrics.mrr) },
+            { label: 'GMV Ventas Gastro', value: formatCurrency(metrics.gmv) },
+          ].map((kpi, i) => (
+            <div
+              key={i}
+              className="rounded-[var(--radius-md)] border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5"
+            >
+              <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">{kpi.label}</span>
+              <p className="mt-2 text-[22px] font-medium text-[var(--accent)] tracking-tight leading-none">{kpi.value}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Dos columnas de Gestión */}
         <div className="grid gap-6 lg:grid-cols-12">
           
-          {/* Columna Izquierda: Formulario */}
-          <div className="lg:col-span-5 rounded-2xl border border-white/[0.04] bg-white/[0.01] p-6 backdrop-blur-xl">
-            <h2 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-purple-400" />
-              Registrar Inquilino Nuevo
-            </h2>
+          {/* Tabla de Gestión de Tenants */}
+          <div className="lg:col-span-8 flex flex-col rounded-[var(--radius-lg)] border-[0.5px] border-zinc-800 bg-zinc-900/40 overflow-hidden">
+            <div className="px-5 py-4 border-b-[0.5px] border-zinc-800 bg-zinc-900/10">
+              <h2 className="text-[13px] font-medium text-white uppercase tracking-wider">
+                Gestión de Tenants
+              </h2>
+            </div>
 
-            {errorMsg && (
-              <div className="mb-4 rounded-xl border border-rose-500/15 bg-rose-500/5 px-4 py-3 text-xs text-rose-400">
-                {errorMsg}
-              </div>
-            )}
-            {successMsg && (
-              <div className="mb-4 rounded-xl border border-emerald-500/15 bg-emerald-500/5 px-4 py-3 text-xs text-emerald-400">
-                {successMsg}
-              </div>
-            )}
+            <div className="flex-1 overflow-x-auto">
+              {loadingList ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="h-6 w-6 border-2 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
+                </div>
+              ) : empresas.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-600">
+                  <p className="text-[12px] font-normal">No hay empresas registradas.</p>
+                </div>
+              ) : (
+                <table className="w-full text-[12px] border-collapse text-left">
+                  <thead>
+                    <tr className="border-b-[0.5px] border-zinc-800 bg-zinc-900/20 text-zinc-500 font-medium uppercase tracking-wider text-[9px]">
+                      <th className="px-5 py-3 font-medium">ID</th>
+                      <th className="px-5 py-3 font-medium">Razón Social</th>
+                      <th className="px-5 py-3 font-medium">NIT</th>
+                      <th className="px-5 py-3 font-medium">Subdominio</th>
+                      <th className="px-5 py-3 font-medium">Plan</th>
+                      <th className="px-5 py-3 font-medium">Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y-[0.5px] divide-zinc-800">
+                    {empresas.map((emp) => (
+                      <tr key={emp.id} className="hover:bg-zinc-900/35 transition-colors">
+                        <td className="px-5 py-3.5 font-mono text-zinc-500">#{emp.id}</td>
+                        <td className="px-5 py-3.5 text-white font-medium">{emp.nombre}</td>
+                        <td className="px-5 py-3.5 text-zinc-400 font-normal">{emp.nit || '—'}</td>
+                        <td className="px-5 py-3.5 text-zinc-400 font-normal font-mono">{emp.subdominio || '—'}</td>
+                        <td className="px-5 py-3.5">
+                          <select
+                            value={emp.plan_suscripcion || 'Basico'}
+                            onChange={(e) => handleUpdatePlan(emp.id, e.target.value as any)}
+                            className="bg-zinc-950 border-[0.5px] border-zinc-800 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] text-[var(--accent-light)] font-normal outline-none focus:border-[var(--accent)]"
+                          >
+                            <option value="Basico">Básico (140 BOB)</option>
+                            <option value="Medio">Medio (280 BOB)</option>
+                            <option value="Premium">Premium (450 BOB)</option>
+                          </select>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <select
+                            value={emp.estado_cuenta || 'Activo'}
+                            onChange={(e) => handleUpdateEstado(emp.id, e.target.value as any)}
+                            className={`bg-zinc-950 border-[0.5px] border-zinc-800 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-normal outline-none focus:border-[var(--accent)] ${
+                              emp.estado_cuenta === 'Activo'
+                                ? 'text-emerald-400'
+                                : emp.estado_cuenta === 'Suspendido'
+                                ? 'text-rose-400'
+                                : 'text-amber-400'
+                            }`}
+                          >
+                            <option value="Activo">🟢 Activo</option>
+                            <option value="Suspendido">🔴 Suspendido</option>
+                            <option value="Demo">🟡 Demo</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500 block mb-1.5">
-                  Nombre del Negocio
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={nombre}
-                  onChange={(e) => setNombre(e.target.value)}
-                  placeholder="Café Imperial"
-                  className="w-full rounded-xl border border-white/[0.06] bg-zinc-950 px-4 py-2.5 text-[13px] text-white outline-none transition-all focus:border-purple-500/40"
-                />
-              </div>
+          {/* Formulario Lateral de Aprovisionamiento */}
+          <div className="lg:col-span-4 rounded-[var(--radius-lg)] border-[0.5px] border-zinc-800 bg-zinc-900/40 p-6 flex flex-col justify-between">
+            <div>
+              <h2 className="text-[13px] font-medium text-white uppercase tracking-wider mb-5">
+                Aprovisionar Tenant
+              </h2>
 
-              <div className="grid grid-cols-2 gap-3">
+              {errorMsg && (
+                <div className="mb-4 rounded-[var(--radius-sm)] border-[0.5px] border-rose-500/10 bg-rose-500/5 px-4 py-3 text-[12px] text-rose-400 font-normal">
+                  {errorMsg}
+                </div>
+              )}
+              {successMsg && (
+                <div className="mb-4 rounded-[var(--radius-sm)] border-[0.5px] border-emerald-500/10 bg-emerald-500/5 px-4 py-3 text-[12px] text-emerald-400 font-normal">
+                  {successMsg}
+                </div>
+              )}
+
+              <form onSubmit={handleCreateTenant} className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500 block mb-1.5">
-                    Giro Comercial
+                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
+                    Razón Social
                   </label>
-                  <select
-                    value={giro}
-                    onChange={(e) => setGiro(e.target.value as any)}
-                    className="w-full rounded-xl border border-white/[0.06] bg-zinc-950 px-3 py-2.5 text-[13px] text-white outline-none transition-all focus:border-purple-500/40"
-                  >
-                    <option value="CAFETERIA">☕ Cafetería</option>
-                    <option value="RESTAURANTE">🍽️ Restaurante</option>
-                  </select>
+                  <input
+                    type="text"
+                    required
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder="Restaurante Central"
+                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700"
+                  />
                 </div>
 
                 <div>
-                  <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500 block mb-1.5">
-                    Plan Mensual
+                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
+                    NIT
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={nit}
+                    onChange={(e) => setNit(e.target.value)}
+                    placeholder="1020304050"
+                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
+                    Subdominio (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={subdomain}
+                    onChange={(e) => setSubdomain(e.target.value)}
+                    placeholder="central"
+                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
+                    Plan Inicial
                   </label>
                   <select
                     value={plan}
                     onChange={(e) => setPlan(e.target.value as any)}
-                    className="w-full rounded-xl border border-white/[0.06] bg-zinc-950 px-3 py-2.5 text-[13px] text-white outline-none transition-all focus:border-purple-500/40"
+                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] font-normal"
                   >
                     <option value="Basico">Básico (140 BOB)</option>
                     <option value="Medio">Medio (280 BOB)</option>
                     <option value="Premium">Premium (450 BOB)</option>
                   </select>
                 </div>
-              </div>
 
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500 block mb-1.5">
-                  Correo Electrónico Administrador
-                </label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@negocio.com"
-                  className="w-full rounded-xl border border-white/[0.06] bg-zinc-950 px-4 py-2.5 text-[13px] text-white outline-none transition-all focus:border-purple-500/40"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500 block mb-1.5">
-                  Contraseña Temporal
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-xl border border-white/[0.06] bg-zinc-950 px-4 py-2.5 text-[13px] text-white outline-none transition-all focus:border-purple-500/40"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-fuchsia-600 py-3 text-xs font-bold text-white shadow-xl shadow-purple-500/10 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
-              >
-                {submitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                    Creando infraestructura...
-                  </span>
-                ) : (
-                  'Registrar Empresa y Admin'
-                )}
-              </button>
-            </form>
-          </div>
-
-          {/* Columna Derecha: Tabla de empresas */}
-          <div className="lg:col-span-7 flex flex-col rounded-2xl border border-white/[0.04] bg-white/[0.01] overflow-hidden">
-            <div className="px-5 py-4 border-b border-white/[0.04] bg-white/[0.005] flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-indigo-400" />
-                Empresas Registradas ({empresas.length})
-              </h2>
-              <button 
-                onClick={loadEmpresas}
-                className="text-[11px] font-semibold text-zinc-400 hover:text-white transition-colors"
-              >
-                Actualizar ↻
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto min-h-[400px]">
-              {loadingList ? (
-                <div className="flex items-center justify-center h-full py-20">
-                  <div className="h-6 w-6 rounded-full border-2 border-zinc-850 border-t-purple-500 animate-spin" />
-                </div>
-              ) : empresas.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-600">
-                  <span className="text-3xl mb-2">🏢</span>
-                  <p className="text-xs">No hay empresas registradas.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-white/[0.02]">
-                  {/* Table Header */}
-                  <div className="grid grid-cols-12 gap-3 px-5 py-2.5 text-[9px] font-bold uppercase tracking-wider text-zinc-500 bg-white/[0.002]">
-                    <div className="col-span-2">ID</div>
-                    <div className="col-span-4">Negocio</div>
-                    <div className="col-span-3">Giro</div>
-                    <div className="col-span-3 text-right">Plan Mensual</div>
-                  </div>
-
-                  {/* Table Body */}
-                  {empresas.map((emp) => (
-                    <div key={emp.id} className="grid grid-cols-12 gap-3 px-5 py-3.5 items-center hover:bg-white/[0.005] transition-colors">
-                      <div className="col-span-2 font-mono text-[11px] text-zinc-500">#{emp.id}</div>
-                      <div className="col-span-4">
-                        <p className="text-[13px] font-bold text-white leading-none">{emp.nombre}</p>
-                        <p className="text-[10px] text-zinc-600 mt-1 font-mono">
-                          {emp.creado_at ? new Date(emp.creado_at).toLocaleDateString([], { day: '2-digit', month: 'short' }) : 'S/F'}
-                        </p>
-                      </div>
-                      <div className="col-span-3">
-                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold border ${
-                          emp.giro === 'RESTAURANTE'
-                            ? 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5'
-                            : 'text-amber-400 border-amber-500/20 bg-amber-500/5'
-                        }`}>
-                          {emp.giro === 'RESTAURANTE' ? '🍽️ Restaurante' : '☕ Cafetería'}
-                        </span>
-                      </div>
-                      <div className="col-span-3 text-right font-mono text-[12px] font-extrabold text-white">
-                        {formatCurrency(emp.plan_mensual || '0')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] py-3 text-[12px] font-medium text-white transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-40"
+                >
+                  {submitting ? 'Aprovisionando...' : 'Crear Inquilino'}
+                </button>
+              </form>
             </div>
           </div>
           

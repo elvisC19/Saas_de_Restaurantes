@@ -194,3 +194,53 @@ ALTER TABLE empresas ALTER COLUMN giro SET NOT NULL;
 -- Habilitar el rol 'SuperAdmin' en el CHECK constraint de la tabla usuarios
 ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
 ALTER TABLE usuarios ADD CONSTRAINT usuarios_rol_check CHECK (rol IN ('Administrador', 'Cajero', 'Cocina', 'SuperAdmin'));
+
+-- Columnas de Control Multi-Tenant (Bloque 1 SaaS)
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS plan_suscripcion VARCHAR(20) DEFAULT 'Basico' CHECK (plan_suscripcion IN ('Basico', 'Medio', 'Premium'));
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS estado_cuenta VARCHAR(20) DEFAULT 'Activo' CHECK (estado_cuenta IN ('Activo', 'Suspendido', 'Demo'));
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS subdominio VARCHAR(50) UNIQUE;
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS total_licencias INT DEFAULT 1;
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS nit VARCHAR(20);
+
+-- 1. Crear tabla 'mesas'
+CREATE TABLE IF NOT EXISTS mesas (
+    id SERIAL PRIMARY KEY,
+    empresa_id INT REFERENCES empresas(id) ON DELETE CASCADE,
+    numero_mesa INT NOT NULL,
+    estado VARCHAR(20) DEFAULT 'Libre' CHECK (estado IN ('Libre', 'Ocupada', 'Sucia')),
+    capacidad INT DEFAULT 4,
+    unificada_con INT REFERENCES mesas(id) ON DELETE SET NULL,
+    creado_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 2. Vincular clave foránea 'mesa_id' en la tabla 'pedidos'
+ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS mesa_id INT REFERENCES mesas(id) ON DELETE SET NULL;
+
+-- 3. Insertar mesas de semilla para Café Central Sucre (empresa_id = 1)
+INSERT INTO mesas (id, empresa_id, numero_mesa, estado, capacidad) VALUES
+(1, 1, 1, 'Libre', 4),
+(2, 1, 2, 'Libre', 2),
+(3, 1, 3, 'Libre', 4),
+(4, 1, 4, 'Libre', 6),
+(5, 1, 5, 'Libre', 4),
+(6, 1, 6, 'Libre', 2)
+ON CONFLICT (id) DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('mesas', 'id'), COALESCE(MAX(id), 1)) FROM mesas;
+
+-- 4. Crear tabla 'turnos_personal'
+CREATE TABLE IF NOT EXISTS turnos_personal (
+    id SERIAL PRIMARY KEY,
+    empresa_id INT REFERENCES empresas(id) ON DELETE CASCADE,
+    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+    fecha_apertura TIMESTAMP DEFAULT NOW(),
+    fecha_cierre TIMESTAMP NULL,
+    monto_apertura NUMERIC(10,2) NOT NULL,
+    monto_cierre NUMERIC(10,2) NULL,
+    ventas_calculadas NUMERIC(10,2) DEFAULT 0.00,
+    notas_caja TEXT NULL,
+    estado VARCHAR(20) DEFAULT 'Abierto' CHECK (estado IN ('Abierto', 'Cerrado'))
+);
+
+
+
