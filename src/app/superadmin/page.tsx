@@ -6,12 +6,12 @@ import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/math';
 
-// ─── TYPES ──────────────────────────────────────────────────────────
 interface SuperAdminEmpresa {
   id: number;
   nombre: string;
   nit?: string;
   giro: 'CAFETERIA' | 'RESTAURANTE';
+  giro_negocio?: 'CAFETERIA' | 'RESTAURANTE';
   plan_mensual: string;
   plan_suscripcion?: 'Basico' | 'Medio' | 'Premium';
   estado_cuenta?: 'Activo' | 'Suspendido' | 'Demo';
@@ -30,9 +30,8 @@ interface TicketSoporte {
   gravedad: 'Critica' | 'Media' | 'Baja';
   descripcion: string;
   estado: 'Abierto' | 'En Progreso' | 'Resuelto';
-  creado_at: string;
+  fecha_creacion: string;
   resuelto_at: string | null;
-  // Joined
   empresas?: { nombre: string };
 }
 
@@ -47,31 +46,26 @@ type TabDirectorio = 'RESTAURANTE' | 'CAFETERIA';
 type TabPrincipal = 'directorio' | 'tickets' | 'alertas';
 type AlcanceAlerta = 'Global' | 'Empresa' | 'Rol';
 
-// ─── COMPONENT ──────────────────────────────────────────────────────
 export default function SuperAdminPage() {
   const { rol, loading: authLoading } = useAuth();
   const router = useRouter();
 
-  // ── Main Navigation ──
   const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('directorio');
   const [tabDirectorio, setTabDirectorio] = useState<TabDirectorio>('RESTAURANTE');
 
-  // ── Data ──
   const [empresas, setEmpresas] = useState<SuperAdminEmpresa[]>([]);
   const [tickets, setTickets] = useState<TicketSoporte[]>([]);
   const [metrics, setMetrics] = useState<SaaSMetrics>({ totalTenants: 0, activeTenants: 0, mrr: 0, gmv: 0 });
   const [loadingEmpresas, setLoadingEmpresas] = useState(true);
   const [loadingTickets, setLoadingTickets] = useState(true);
 
-  // ── Form: Registrar Nuevo Negocio ──
   const [formNombre, setFormNombre] = useState('');
   const [formNit, setFormNit] = useState('');
-  const [formGiro, setFormGiro] = useState<'RESTAURANTE' | 'CAFETERIA'>('RESTAURANTE');
+  const [formRubro, setFormRubro] = useState<'RESTAURANTE' | 'CAFETERIA'>('RESTAURANTE');
   const [formPlan, setFormPlan] = useState<'Basico' | 'Medio' | 'Premium'>('Basico');
   const [formLimiteUsuarios, setFormLimiteUsuarios] = useState('3');
   const [submittingEmpresa, setSubmittingEmpresa] = useState(false);
 
-  // ── Form: Crear Usuario Operativo ──
   const [userEmail, setUserEmail] = useState('');
   const [userPassword, setUserPassword] = useState('');
   const [userNombre, setUserNombre] = useState('');
@@ -79,7 +73,6 @@ export default function SuperAdminPage() {
   const [userRol, setUserRol] = useState<'Cajero' | 'Cocina'>('Cajero');
   const [submittingUser, setSubmittingUser] = useState(false);
 
-  // ── Form: Emitir Alerta ──
   const [alertaTitulo, setAlertaTitulo] = useState('');
   const [alertaMensaje, setAlertaMensaje] = useState('');
   const [alertaAlcance, setAlertaAlcance] = useState<AlcanceAlerta>('Global');
@@ -88,23 +81,19 @@ export default function SuperAdminPage() {
   const [alertaPrioridad, setAlertaPrioridad] = useState<'Urgente' | 'Normal' | 'Informativa'>('Normal');
   const [submittingAlerta, setSubmittingAlerta] = useState(false);
 
-  // ── Notifications ──
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  // ─── AUTH GUARD ────────────────────────────────────────────────────
   useEffect(() => {
     if (!authLoading && rol !== 'SuperAdmin') {
       router.push('/');
     }
   }, [rol, authLoading, router]);
 
-  // ─── TOAST HELPER ──────────────────────────────────────────────────
   const showToast = useCallback((type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // ─── DATA LOADERS ──────────────────────────────────────────────────
   const fetchEmpresas = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -125,7 +114,7 @@ export default function SuperAdminPage() {
       const { data, error } = await supabase
         .from('tickets_soporte')
         .select('*, empresas(nombre)')
-        .order('creado_at', { ascending: false });
+        .order('fecha_creacion', { ascending: false });
       if (error) throw error;
       setTickets(data || []);
     } catch (err) {
@@ -152,7 +141,6 @@ export default function SuperAdminPage() {
     }
   }, []);
 
-  // ─── INITIAL LOAD & REALTIME ───────────────────────────────────────
   useEffect(() => {
     if (rol !== 'SuperAdmin') return;
 
@@ -160,7 +148,6 @@ export default function SuperAdminPage() {
     loadTickets();
     loadMetrics();
 
-    // Realtime subscription for tickets_soporte
     const channel = supabase
       .channel('superadmin-tickets-rt')
       .on(
@@ -177,7 +164,6 @@ export default function SuperAdminPage() {
     };
   }, [rol, fetchEmpresas, loadTickets, loadMetrics]);
 
-  // ─── HANDLERS: EMPRESA ─────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNombre.trim() || !formNit.trim()) {
@@ -192,7 +178,8 @@ export default function SuperAdminPage() {
       const { error } = await supabase.from('empresas').insert({
         nombre: formNombre.trim(),
         nit: formNit.trim(),
-        giro: formGiro,
+        giro: formRubro,
+        giro_negocio: formRubro,
         plan_suscripcion: formPlan,
         plan_mensual: planVal,
         estado_cuenta: 'Activo',
@@ -206,7 +193,6 @@ export default function SuperAdminPage() {
       setFormNit('');
       setFormLimiteUsuarios('3');
       
-      // Re-fetch obligatorio post-inserción
       await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
@@ -239,7 +225,6 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ─── HANDLERS: USUARIO OPERATIVO ───────────────────────────────────
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userEmail.trim() || !userPassword.trim() || !userNombre.trim() || !userEmpresaId) {
@@ -253,7 +238,6 @@ export default function SuperAdminPage() {
       return;
     }
 
-    // Validate license cap
     const limite = targetEmpresa.limite_usuarios || 3;
     const { data: currentUsers, error: countErr } = await supabase
       .from('usuarios')
@@ -271,7 +255,6 @@ export default function SuperAdminPage() {
 
     setSubmittingUser(true);
     try {
-      // Create auth user via Supabase Admin API (client-side workaround: use signUp)
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: userEmail.trim(),
         password: userPassword.trim(),
@@ -279,7 +262,6 @@ export default function SuperAdminPage() {
       if (authErr) throw authErr;
       if (!authData.user) throw new Error('No se pudo crear el usuario de autenticación.');
 
-      // Insert into usuarios table
       const { error: profileErr } = await supabase.from('usuarios').insert({
         id: authData.user.id,
         empresa_id: parseInt(userEmpresaId),
@@ -300,7 +282,6 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ─── HANDLERS: TICKETS ─────────────────────────────────────────────
   const handleTicketStatusChange = async (ticketId: number, nuevoEstado: 'En Progreso' | 'Resuelto') => {
     try {
       const updatePayload: any = { estado: nuevoEstado };
@@ -316,7 +297,6 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ─── HANDLERS: ALERTAS ─────────────────────────────────────────────
   const handleEmitirAlerta = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!alertaTitulo.trim() || !alertaMensaje.trim()) {
@@ -363,14 +343,11 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ─── COMPUTED ──────────────────────────────────────────────────────
-  // Filtro robusto e insensible a discrepancias menores de mayúsculas/minúsculas y espacios
   const empresasFiltradas = empresas.filter(
     e => (e.giro || '').trim().toUpperCase() === tabDirectorio.toUpperCase()
   );
   const ticketsAbiertos = tickets.filter(t => t.estado !== 'Resuelto').length;
 
-  // ─── RENDER HELPERS ────────────────────────────────────────────────
   const formatTimestamp = (ts: string) => {
     const d = new Date(ts);
     return d.toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' }) +
@@ -395,7 +372,6 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ─── LOADING GUARD ─────────────────────────────────────────────────
   if (authLoading || rol !== 'SuperAdmin') {
     return (
       <div className="flex flex-1 items-center justify-center min-h-screen bg-zinc-950 text-zinc-500">
@@ -407,13 +383,9 @@ export default function SuperAdminPage() {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════════
-  //  RENDER
-  // ═══════════════════════════════════════════════════════════════════
   return (
     <div className="flex flex-1 flex-col bg-zinc-950 overflow-y-auto min-h-screen">
 
-      {/* ─── TOAST ─── */}
       {toast && (
         <div className={`fixed top-5 right-5 z-[100] max-w-sm rounded-lg border-[0.5px] px-5 py-3.5 text-[12px] font-medium shadow-2xl transition-all animate-[slideIn_0.3s_ease-out] ${
           toast.type === 'success'
@@ -429,7 +401,6 @@ export default function SuperAdminPage() {
 
       <div className="mx-auto w-full max-w-[1440px] p-6 lg:p-8 space-y-6">
 
-        {/* ═══ HEADER ═══ */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b-[0.5px] border-zinc-800 pb-5">
           <div>
             <h1 className="text-[20px] font-semibold text-white tracking-tight flex items-center gap-2.5">
@@ -444,7 +415,6 @@ export default function SuperAdminPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Network Indicator */}
             <div className="flex items-center gap-2 rounded-full border-[0.5px] border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-[11px] font-normal text-emerald-400">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -462,7 +432,6 @@ export default function SuperAdminPage() {
           </div>
         </div>
 
-        {/* ═══ KPI STRIP ═══ */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             { label: 'Inquilinos Totales', value: `${metrics.totalTenants}`, icon: '🏢' },
@@ -480,7 +449,6 @@ export default function SuperAdminPage() {
           ))}
         </div>
 
-        {/* ═══ MAIN TAB NAVIGATION ═══ */}
         <div className="flex items-center gap-1 rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/30 p-1">
           {([
             { key: 'directorio' as TabPrincipal, label: '📋 Directorio de Empresas', badge: empresas.length },
@@ -510,16 +478,11 @@ export default function SuperAdminPage() {
           ))}
         </div>
 
-        {/* ═══════════════════════════════════════════════════════════════════
-             TAB 1: DIRECTORIO DE EMPRESAS
-        ═══════════════════════════════════════════════════════════════════ */}
         {tabPrincipal === 'directorio' && (
           <div className="grid gap-6 lg:grid-cols-12">
 
-            {/* ─── LEFT: TABLAS DE DIRECTORIO ─── */}
             <div className="lg:col-span-8 flex flex-col gap-4">
 
-              {/* Sub-tabs: Restaurante / Cafetería */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setTabDirectorio('RESTAURANTE')}
@@ -529,7 +492,7 @@ export default function SuperAdminPage() {
                       : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
-                  🍽️ Restaurantes
+                  🍽️ Rubro Restaurante
                   <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
                     {empresas.filter(e => (e.giro || '').trim().toUpperCase() === 'RESTAURANTE').length}
                   </span>
@@ -542,14 +505,13 @@ export default function SuperAdminPage() {
                       : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:text-zinc-300'
                   }`}
                 >
-                  ☕ Cafeterías
+                  ☕ Rubro Cafetería
                   <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
                     {empresas.filter(e => (e.giro || '').trim().toUpperCase() === 'CAFETERIA').length}
                   </span>
                 </button>
               </div>
 
-              {/* Tabla de Empresas */}
               <div className="flex flex-col rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 overflow-hidden">
                 <div className="px-5 py-4 border-b-[0.5px] border-zinc-800 bg-zinc-900/20">
                   <h2 className="text-[13px] font-medium text-white uppercase tracking-wider">
@@ -626,10 +588,8 @@ export default function SuperAdminPage() {
               </div>
             </div>
 
-            {/* ─── RIGHT: FORMS PANEL ─── */}
             <div className="lg:col-span-4 flex flex-col gap-4">
 
-              {/* Form 1: Registrar Nuevo Negocio */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
                 <h2 className="text-[12px] font-semibold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/15 text-[10px]">+</span>
@@ -663,14 +623,14 @@ export default function SuperAdminPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Giro *</label>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Rubro Comercial *</label>
                       <select
-                        value={formGiro}
-                        onChange={(e) => setFormGiro(e.target.value as any)}
+                        value={formRubro}
+                        onChange={(e) => setFormRubro(e.target.value as any)}
                         className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 cursor-pointer"
                       >
-                        <option value="RESTAURANTE">🍽️ Restaurante</option>
-                        <option value="CAFETERIA">☕ Cafetería</option>
+                        <option value="RESTAURANTE">🍽️ Rubro Restaurante</option>
+                        <option value="CAFETERIA">☕ Rubro Cafetería</option>
                       </select>
                     </div>
                     <div>
@@ -710,7 +670,6 @@ export default function SuperAdminPage() {
                 </form>
               </div>
 
-              {/* Form 2: Crear Usuario Operativo */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
                 <h2 className="text-[12px] font-semibold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-500/15 text-[10px]">👤</span>
@@ -796,13 +755,9 @@ export default function SuperAdminPage() {
           </div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════════
-             TAB 2: BUZÓN GLOBAL DE SOPORTE TÉCNICO
-        ═══════════════════════════════════════════════════════════════════ */}
         {tabPrincipal === 'tickets' && (
           <div className="flex flex-col gap-4">
 
-            {/* Header del Módulo */}
             <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 px-5 py-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -827,7 +782,6 @@ export default function SuperAdminPage() {
               </div>
             </div>
 
-            {/* Lista de Tickets */}
             {loadingTickets ? (
               <div className="flex items-center justify-center py-20">
                 <div className="h-6 w-6 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
@@ -849,11 +803,8 @@ export default function SuperAdminPage() {
                   >
                     <div className="flex flex-col lg:flex-row lg:items-start gap-4">
 
-                      {/* Left: Info */}
                       <div className="flex-1 min-w-0 space-y-2.5">
-                        {/* Top row: badges */}
                         <div className="flex flex-wrap items-center gap-2">
-                          {/* Gravedad Badge */}
                           <span className={`inline-flex items-center gap-1 rounded-md border-[0.5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${gravedadColor(ticket.gravedad)}`}>
                             {ticket.gravedad === 'Critica' && '🔴'}
                             {ticket.gravedad === 'Media' && '🟡'}
@@ -861,16 +812,13 @@ export default function SuperAdminPage() {
                             {ticket.gravedad}
                           </span>
 
-                          {/* Estado Badge */}
                           <span className={`text-[10px] font-medium ${estadoTicketColor(ticket.estado)}`}>
                             {ticket.estado}
                           </span>
 
-                          {/* Ticket ID */}
                           <span className="text-[10px] text-zinc-600 font-mono">TKT-{String(ticket.id).padStart(4, '0')}</span>
                         </div>
 
-                        {/* Origen */}
                         <div className="flex items-center gap-3 text-[11px]">
                           <span className="text-zinc-500">
                             <strong className="text-zinc-300">{ticket.empresas?.nombre || `Empresa #${ticket.empresa_id}`}</strong>
@@ -879,22 +827,19 @@ export default function SuperAdminPage() {
                           </span>
                         </div>
 
-                        {/* Emisor y Timestamp */}
                         <div className="flex items-center gap-2 text-[10px] text-zinc-600">
                           <span>👤 {ticket.emisor_nombre}</span>
                           <span>·</span>
                           <span className="rounded-md bg-zinc-800/50 px-1.5 py-0.5 text-[9px] font-mono">{ticket.emisor_rol}</span>
                           <span>·</span>
-                          <span>🕐 {formatTimestamp(ticket.creado_at)}</span>
+                          <span>🕐 {formatTimestamp(ticket.fecha_creacion)}</span>
                         </div>
 
-                        {/* Descripción */}
                         <div className="rounded-lg border-[0.5px] border-zinc-800/50 bg-zinc-950/60 px-3.5 py-2.5 text-[12px] text-zinc-300 leading-relaxed">
                           {ticket.descripcion}
                         </div>
                       </div>
 
-                      {/* Right: Actions */}
                       {ticket.estado !== 'Resuelto' && (
                         <div className="flex lg:flex-col gap-2 shrink-0">
                           {ticket.estado === 'Abierto' && (
@@ -927,13 +872,9 @@ export default function SuperAdminPage() {
           </div>
         )}
 
-        {/* ═══════════════════════════════════════════════════════════════════
-             TAB 3: EMISIÓN DE ALERTAS DE INFRAESTRUCTURA
-        ═══════════════════════════════════════════════════════════════════ */}
         {tabPrincipal === 'alertas' && (
           <div className="grid gap-6 lg:grid-cols-12">
 
-            {/* ─── LEFT: Formulario de Emisión ─── */}
             <div className="lg:col-span-7">
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-6">
                 <h2 className="text-[14px] font-semibold text-white flex items-center gap-2 mb-1">
@@ -945,7 +886,6 @@ export default function SuperAdminPage() {
 
                 <form onSubmit={handleEmitirAlerta} className="space-y-4">
 
-                  {/* Título */}
                   <div>
                     <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Título del Comunicado *</label>
                     <input
@@ -958,7 +898,6 @@ export default function SuperAdminPage() {
                     />
                   </div>
 
-                  {/* Mensaje */}
                   <div>
                     <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Cuerpo del Mensaje *</label>
                     <textarea
@@ -971,7 +910,6 @@ export default function SuperAdminPage() {
                     />
                   </div>
 
-                  {/* Alcance + Prioridad */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Alcance de Difusión *</label>
@@ -999,7 +937,6 @@ export default function SuperAdminPage() {
                     </div>
                   </div>
 
-                  {/* Conditional: Empresa Selector */}
                   {alertaAlcance === 'Empresa' && (
                     <div>
                       <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Empresa Destino *</label>
@@ -1017,7 +954,6 @@ export default function SuperAdminPage() {
                     </div>
                   )}
 
-                  {/* Conditional: Rol Selector */}
                   {alertaAlcance === 'Rol' && (
                     <div>
                       <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Rol Destino *</label>
@@ -1044,10 +980,8 @@ export default function SuperAdminPage() {
               </div>
             </div>
 
-            {/* ─── RIGHT: Vista Previa / Ayuda ─── */}
             <div className="lg:col-span-5 flex flex-col gap-4">
 
-              {/* Preview Card */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
                 <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-3">Vista Previa del Comunicado</h3>
                 <div className="rounded-lg border-[0.5px] border-zinc-700/50 bg-zinc-950/80 p-4 space-y-2">
@@ -1086,7 +1020,6 @@ export default function SuperAdminPage() {
                 </div>
               </div>
 
-              {/* Guide Panel */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5 space-y-3">
                 <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Guía de Alcances</h3>
                 <div className="space-y-2.5">
@@ -1106,7 +1039,6 @@ export default function SuperAdminPage() {
                 </div>
               </div>
 
-              {/* Quick Stats */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
                 <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-3">Estadísticas de Alcance</h3>
                 <div className="grid grid-cols-2 gap-3">
@@ -1128,7 +1060,6 @@ export default function SuperAdminPage() {
 
       </div>
 
-      {/* ─── INLINE ANIMATION KEYFRAMES ─── */}
       <style jsx>{`
         @keyframes slideIn {
           from { opacity: 0; transform: translateX(20px); }
