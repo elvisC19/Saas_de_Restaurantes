@@ -38,36 +38,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const fetchSessionData = async (userId: string) => {
-    // 1. Obtener perfil de usuario
-    const { data: userData, error: userErr } = await supabase
-      .from('usuarios')
-      .select('empresa_id, rol, nombre')
-      .eq('id', userId)
-      .single();
+    try {
+      // 1. Obtener perfil de usuario
+      const { data: userData, error: userErr } = await supabase
+        .from('usuarios')
+        .select('empresa_id, rol, nombre')
+        .eq('id', userId)
+        .single();
 
-    if (userErr) throw userErr;
-    if (!userData) throw new Error('Perfil de usuario no encontrado en la base de datos.');
+      if (userErr || !userData) {
+        console.error('Error al consultar perfil del usuario o registro inexistente:', userErr);
+        return null;
+      }
 
-    // 2. Obtener datos de la empresa (giro, nombre, plan_mensual)
-    const { data: empData, error: empErr } = await supabase
-      .from('empresas')
-      .select('giro, nombre, plan_mensual')
-      .eq('id', userData.empresa_id)
-      .single();
+      // 2. Obtener datos de la empresa (giro, nombre, plan_mensual)
+      const { data: empData, error: empErr } = await supabase
+        .from('empresas')
+        .select('giro, nombre, plan_mensual')
+        .eq('id', userData.empresa_id)
+        .single();
 
-    if (empErr) throw empErr;
-    if (!empData) throw new Error('Empresa asociada no encontrada.');
+      if (empErr || !empData) {
+        console.error('Error al consultar empresa o registro inexistente:', empErr);
+        return null;
+      }
 
-    // 3. Semillar datos si es necesario
-    await initDatabaseSeed(userData.empresa_id);
+      // 3. Semillar datos si es necesario
+      await initDatabaseSeed(userData.empresa_id);
 
-    return {
-      rol: userData.rol as RolUsuario,
-      giro: empData.giro as 'CAFETERIA' | 'RESTAURANTE',
-      empresaId: userData.empresa_id,
-      empresaNombre: empData.nombre,
-      plan: derivePlan(empData.plan_mensual)
-    };
+      return {
+        rol: userData.rol as RolUsuario,
+        giro: empData.giro as 'CAFETERIA' | 'RESTAURANTE',
+        empresaId: userData.empresa_id,
+        empresaNombre: empData.nombre,
+        plan: derivePlan(empData.plan_mensual)
+      };
+    } catch (error) {
+      console.error('Error imprevisto en fetchSessionData:', error);
+      return null;
+    }
   };
 
   // Cargar y observar sesión
@@ -81,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user && active) {
           const data = await fetchSessionData(session.user.id);
-          if (active) {
+          if (data && active) {
             setRolState(data.rol);
             setGiroState(data.giro);
             setEmpresaIdState(data.empresaId);
@@ -106,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         try {
           const data = await fetchSessionData(session.user.id);
-          if (active) {
+          if (data && active) {
             setRolState(data.rol);
             setGiroState(data.giro);
             setEmpresaIdState(data.empresaId);
@@ -142,6 +151,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const data = await fetchSessionData(authData.user.id);
+      if (!data) {
+        throw new Error('No se pudo recuperar el perfil o empresa asociada de este usuario.');
+      }
       
       setRolState(data.rol);
       setGiroState(data.giro);
