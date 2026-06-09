@@ -7,13 +7,20 @@ import { supabase } from '@/lib/supabase';
 import { InventarioInsumo } from '@/types/database';
 import { formatCurrency } from '@/lib/math';
 
-// Umbrales de stock para barras de progreso (basados en la data semilla)
+// Umbrales de stock para barras de progreso (basados en la data semilla extendida)
 const STOCK_CAPS: Record<string, number> = {
+  // Cafetería
   'Café en grano': 5000,
   'Leche entera': 10000,
   'Azúcar': 3000,
   'Agua purificada': 20000,
   'Taza descartable 8oz': 200,
+  // Restaurante
+  'Lomo de res': 10000,
+  'Papas': 100,
+  'Arroz': 5000,
+  'Aceite': 2000,
+  'Huevo': 50,
 };
 
 const UNIT_LABELS: Record<string, string> = {
@@ -23,7 +30,7 @@ const UNIT_LABELS: Record<string, string> = {
 };
 
 export default function AdminPage() {
-  const { rol, empresaId } = useAuth();
+  const { rol, empresaId, giro } = useAuth();
   const router = useRouter();
 
   const [insumos, setInsumos] = useState<InventarioInsumo[]>([]);
@@ -33,13 +40,16 @@ export default function AdminPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [pedidosHoy, setPedidosHoy] = useState(0);
   const [ingresoHoy, setIngresoHoy] = useState('0.00');
+  const [itemsMenuCount, setItemsMenuCount] = useState(0);
 
   useEffect(() => {
-    if (!rol) router.push('/');
-  }, [rol, router]);
+    if (!rol || !giro) {
+      router.push('/');
+    }
+  }, [rol, giro, router]);
 
   const loadInventory = async () => {
-    if (!rol) return;
+    if (!rol || !giro) return;
     try {
       const { data, error } = await supabase
         .from('inventario_insumos')
@@ -47,7 +57,17 @@ export default function AdminPage() {
         .eq('empresa_id', empresaId)
         .order('id', { ascending: true });
       if (error) throw error;
-      setInsumos(data || []);
+      
+      const allInsumos = data || [];
+      const filtered = allInsumos.filter((ins) => {
+        if (giro === 'RESTAURANTE') {
+          return ins.nombre === 'Lomo de res' || ins.nombre === 'Papas' || ins.nombre === 'Arroz' || ins.nombre === 'Aceite' || ins.nombre === 'Huevo';
+        } else {
+          // CAFETERIA
+          return ins.nombre === 'Café en grano' || ins.nombre === 'Leche entera' || ins.nombre === 'Azúcar' || ins.nombre === 'Agua purificada' || ins.nombre === 'Taza descartable 8oz';
+        }
+      });
+      setInsumos(filtered);
     } catch {
       setErrorMsg('Error al cargar inventario.');
     } finally {
@@ -56,7 +76,7 @@ export default function AdminPage() {
   };
 
   const loadKPIs = async () => {
-    if (!rol) return;
+    if (!rol || !giro) return;
     try {
       const { data: pedidosData } = await supabase
         .from('pedidos')
@@ -72,13 +92,30 @@ export default function AdminPage() {
         });
         setIngresoHoy(total.toFixed(2));
       }
+
+      // Obtener cantidad de productos filtrados del giro activo
+      const { data: itemsData } = await supabase
+        .from('items_menu')
+        .select('nombre')
+        .eq('empresa_id', empresaId);
+      
+      if (itemsData) {
+        const filteredCount = itemsData.filter((item) => {
+          if (giro === 'RESTAURANTE') {
+            return item.nombre === 'Lomo Saltado' || item.nombre === 'Sopa de Maní';
+          } else {
+            return item.nombre === 'Café Americano' || item.nombre === 'Café con Leche' || item.nombre === 'Café Espresso' || item.nombre === 'Capuccino';
+          }
+        }).length;
+        setItemsMenuCount(filteredCount);
+      }
     } catch {
       // silently fail KPIs
     }
   };
 
   useEffect(() => {
-    if (!rol) return;
+    if (!rol || !giro) return;
     loadInventory();
     loadKPIs();
 
@@ -93,27 +130,45 @@ export default function AdminPage() {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [rol, empresaId]);
+  }, [rol, empresaId, giro]);
 
   const handleResetStock = async () => {
     setResetting(true);
     setErrorMsg(null);
     setSuccessMsg(null);
     try {
-      const defaults = [
-        { id: 1, stock: '5000.0000' },
-        { id: 2, stock: '10000.0000' },
-        { id: 3, stock: '3000.0000' },
-        { id: 4, stock: '20000.0000' },
-        { id: 5, stock: '200.0000' },
-      ];
-      for (const item of defaults) {
-        const { error } = await supabase
-          .from('inventario_insumos')
-          .update({ stock_actual: item.stock })
-          .eq('id', item.id)
-          .eq('empresa_id', empresaId);
-        if (error) throw error;
+      const { data: dbInsumos } = await supabase
+        .from('inventario_insumos')
+        .select('id, nombre')
+        .eq('empresa_id', empresaId);
+
+      if (!dbInsumos) throw new Error('No se encontraron insumos.');
+
+      const defaultStocks: Record<string, string> = {
+        // Cafetería
+        'Café en grano': '5000.0000',
+        'Leche entera': '10000.0000',
+        'Azúcar': '3000.0000',
+        'Agua purificada': '20000.0000',
+        'Taza descartable 8oz': '200.0000',
+        // Restaurante
+        'Lomo de res': '10000.0000',
+        'Papas': '100.0000',
+        'Arroz': '5000.0000',
+        'Aceite': '2000.0000',
+        'Huevo': '50.0000',
+      };
+
+      for (const item of dbInsumos) {
+        const defaultVal = defaultStocks[item.nombre];
+        if (defaultVal) {
+          const { error } = await supabase
+            .from('inventario_insumos')
+            .update({ stock_actual: defaultVal })
+            .eq('id', item.id)
+            .eq('empresa_id', empresaId);
+          if (error) throw error;
+        }
       }
       setSuccessMsg('Stock restablecido a valores semilla.');
       setTimeout(() => setSuccessMsg(null), 3000);
@@ -207,7 +262,7 @@ export default function AdminPage() {
             },
             {
               label: 'Ítems en Menú',
-              value: '2',
+              value: `${itemsMenuCount}`,
               icon: (
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />

@@ -14,7 +14,7 @@ interface CartItem {
 }
 
 export default function PosPage() {
-  const { rol, empresaId } = useAuth();
+  const { rol, empresaId, giro } = useAuth();
   const router = useRouter();
 
   const [productos, setProductos] = useState<ItemMenu[]>([]);
@@ -29,12 +29,14 @@ export default function PosPage() {
   const [pedidoTotal, setPedidoTotal] = useState('0.00');
 
   useEffect(() => {
-    if (!rol) router.push('/');
-  }, [rol, router]);
+    if (!rol || !giro) {
+      router.push('/');
+    }
+  }, [rol, giro, router]);
 
   useEffect(() => {
     async function loadMenu() {
-      if (!rol) return;
+      if (!rol || !giro) return;
       setLoadingItems(true);
       try {
         const { data, error } = await supabase
@@ -43,7 +45,17 @@ export default function PosPage() {
           .eq('empresa_id', empresaId)
           .order('nombre', { ascending: true });
         if (error) throw error;
-        setProductos(data || []);
+        
+        const allItems = data || [];
+        const filtered = allItems.filter((item) => {
+          if (giro === 'RESTAURANTE') {
+            return item.nombre === 'Lomo Saltado' || item.nombre === 'Sopa de Maní';
+          } else {
+            // CAFETERIA
+            return item.nombre === 'Café Americano' || item.nombre === 'Café con Leche' || item.nombre === 'Café Espresso' || item.nombre === 'Capuccino';
+          }
+        });
+        setProductos(filtered);
       } catch (err: any) {
         setErrorMsg('Error de conexión al cargar el menú.');
       } finally {
@@ -51,7 +63,7 @@ export default function PosPage() {
       }
     }
     loadMenu();
-  }, [rol, empresaId]);
+  }, [rol, empresaId, giro]);
 
   const addToCart = useCallback((item: ItemMenu) => {
     setAddedId(item.id);
@@ -148,7 +160,9 @@ export default function PosPage() {
           </div>
         ) : productos.length === 0 ? (
           <div className="flex flex-col items-center justify-center flex-1 py-20 rounded-2xl border border-dashed border-white/[0.04]">
-            <div className="text-4xl mb-3 opacity-30">☕</div>
+            <div className="text-4xl mb-3 opacity-30">
+              {giro === 'RESTAURANTE' ? '🍽️' : '☕'}
+            </div>
             <p className="text-sm text-zinc-500">Menú vacío</p>
             <p className="text-[11px] text-zinc-600 mt-1">Ejecuta el script SQL semilla en Supabase</p>
           </div>
@@ -157,6 +171,19 @@ export default function PosPage() {
             {productos.map((prod) => {
               const isJustAdded = addedId === prod.id;
               const inCart = cart.find((ci) => ci.item.id === prod.id);
+
+              const isRestaurante = giro === 'RESTAURANTE';
+              const icon = prod.nombre.includes('Lomo') ? '🥩' : prod.nombre.includes('Sopa') ? '🥣' : '☕';
+              const iconBg = isRestaurante
+                ? 'from-emerald-500/15 to-teal-500/5 text-emerald-400'
+                : 'from-amber-500/15 to-orange-500/5 text-amber-400';
+              const textHoverColor = isRestaurante
+                ? 'group-hover:text-emerald-300'
+                : 'group-hover:text-amber-300';
+              const btnHoverBg = isRestaurante
+                ? 'group-hover:bg-emerald-500'
+                : 'group-hover:bg-indigo-500';
+
               return (
                 <button
                   key={prod.id}
@@ -175,10 +202,10 @@ export default function PosPage() {
                   )}
 
                   <div>
-                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/5 text-xl">
-                      ☕
+                    <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${iconBg} text-xl`}>
+                      {icon}
                     </div>
-                    <h3 className="text-[15px] font-bold text-white group-hover:text-amber-300 transition-colors leading-tight">
+                    <h3 className={`text-[15px] font-bold text-white ${textHoverColor} transition-colors leading-tight`}>
                       {prod.nombre}
                     </h3>
                   </div>
@@ -188,7 +215,7 @@ export default function PosPage() {
                       <p className="text-[10px] uppercase tracking-widest text-zinc-600 font-semibold">Precio</p>
                       <p className="text-lg font-extrabold text-white tracking-tight">{formatCurrency(prod.precio)}</p>
                     </div>
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-zinc-500 group-hover:bg-indigo-500 group-hover:text-white transition-all">
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-zinc-500 ${btnHoverBg} group-hover:text-white transition-all`}>
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                       </svg>

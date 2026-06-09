@@ -52,10 +52,13 @@ const metrics = [
 ];
 
 export default function HomePage() {
-  const { rol, setRol, empresaNombre } = useAuth();
+  const { rol, setRol, giro, setGiro, empresaNombre } = useAuth();
   const router = useRouter();
 
   const seleccionarRol = (r: RolUsuario, redirect: string) => {
+    if (!giro) {
+      setGiro('CAFETERIA'); // default fallback
+    }
     setRol(r);
     router.push(redirect);
   };
@@ -118,10 +121,41 @@ export default function HomePage() {
       <div className="flex flex-1 flex-col items-center justify-center p-8 lg:p-16">
         <div className="w-full max-w-md">
           {/* Header */}
-          <div className="mb-8 text-center lg:text-left">
+          <div className="mb-6 text-center lg:text-left">
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-600">Simulador de Defensa</p>
             <h2 className="mt-2 text-2xl font-bold text-white">Selecciona tu perfil</h2>
-            <p className="mt-1 text-sm text-zinc-500">Elige un rol para acceder al módulo correspondiente</p>
+            <p className="mt-1 text-sm text-zinc-500">Configura tu giro y accede al módulo correspondiente</p>
+          </div>
+
+          {/* Giro Selector (Cafetería vs. Restaurante) */}
+          <div className="mb-6">
+            <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 block mb-3">
+              Giro del Negocio
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => setGiro('CAFETERIA')}
+                className={`flex items-center justify-center gap-2.5 rounded-xl border p-3.5 text-xs font-bold transition-all duration-300 ${
+                  giro === 'CAFETERIA'
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-400 shadow-lg shadow-amber-500/5'
+                    : 'border-white/[0.04] bg-white/[0.01] text-zinc-400 hover:border-white/[0.08] hover:bg-white/[0.02]'
+                }`}
+              >
+                <span className="text-base">☕</span>
+                Cafetería
+              </button>
+              <button
+                onClick={() => setGiro('RESTAURANTE')}
+                className={`flex items-center justify-center gap-2.5 rounded-xl border p-3.5 text-xs font-bold transition-all duration-300 ${
+                  giro === 'RESTAURANTE'
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 shadow-lg shadow-emerald-500/5'
+                    : 'border-white/[0.04] bg-white/[0.01] text-zinc-400 hover:border-white/[0.08] hover:bg-white/[0.02]'
+                }`}
+              >
+                <span className="text-base">🍽️</span>
+                Restaurante
+              </button>
+            </div>
           </div>
 
           {/* Role Cards */}
@@ -156,7 +190,7 @@ export default function HomePage() {
             <div className="mt-6 flex items-center justify-between rounded-xl border border-white/[0.04] bg-white/[0.02] px-4 py-3 animate-slide-up">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs text-zinc-400">Sesión activa como <strong className="text-white">{rol}</strong></span>
+                <span className="text-xs text-zinc-400">Sesión activa como <strong className="text-white">{rol}</strong> ({giro === 'RESTAURANTE' ? 'Restaurante' : 'Cafetería'})</span>
               </div>
               <button
                 onClick={() => {

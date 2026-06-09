@@ -29,15 +29,19 @@ function ElapsedTimer({ createdAt }: { createdAt: string }) {
 }
 
 export default function CocinaPage() {
-  const { rol, empresaId } = useAuth();
+  const { rol, empresaId, giro } = useAuth();
   const router = useRouter();
   const [pedidos, setPedidos] = useState<PedidoConDetalles[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { if (!rol) router.push('/'); }, [rol, router]);
+  useEffect(() => {
+    if (!rol || !giro) {
+      router.push('/');
+    }
+  }, [rol, giro, router]);
 
   const loadActiveOrders = async () => {
-    if (!rol) return;
+    if (!rol || !giro) return;
     try {
       const { data, error } = await supabase
         .from('pedidos')
@@ -55,15 +59,31 @@ export default function CocinaPage() {
   };
 
   useEffect(() => {
-    if (!rol) return;
+    if (!rol || !giro) return;
     loadActiveOrders();
     const channel = supabase
       .channel('kds-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` }, () => loadActiveOrders())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'detalle_pedidos' }, () => loadActiveOrders())
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
+        (payload) => {
+          console.log('Nuevo pedido recibido:', payload);
+          loadActiveOrders();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
+        (payload) => {
+          console.log('Pedido actualizado:', payload);
+          loadActiveOrders();
+        }
+      )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [rol, empresaId]);
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [rol, empresaId, giro]);
 
   const avanzarEstado = async (pedidoId: number, estadoActual: EstadoPedido) => {
     const next: EstadoPedido = estadoActual === 'Pendiente' ? 'En Preparación' : 'Listo';
