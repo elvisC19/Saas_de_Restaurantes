@@ -1,26 +1,31 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key';
-
-// Inicializar cliente de Supabase con privilegios administrativos
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
-});
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+}
 
 export async function POST(req: Request) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
     // Validar configuración de variables de entorno del servidor
-    if (!supabaseUrl || !serviceRoleKey || serviceRoleKey === 'placeholder-key') {
+    if (!supabaseUrl || !serviceRoleKey) {
       return NextResponse.json(
         { error: 'La clave de servicio SUPABASE_SERVICE_ROLE_KEY no está configurada en el servidor.' },
         { status: 500 }
       );
     }
+
+    const supabaseAdmin = getSupabaseAdmin();
 
     const { nombre, giro, plan, email, password } = await req.json();
 
