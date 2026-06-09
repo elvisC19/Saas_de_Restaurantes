@@ -63,7 +63,7 @@ export default function SuperAdminPage() {
   const [loadingEmpresas, setLoadingEmpresas] = useState(true);
   const [loadingTickets, setLoadingTickets] = useState(true);
 
-  // ── Form: Aprovisionar Empresa ──
+  // ── Form: Registrar Nuevo Negocio ──
   const [formNombre, setFormNombre] = useState('');
   const [formNit, setFormNit] = useState('');
   const [formGiro, setFormGiro] = useState<'RESTAURANTE' | 'CAFETERIA'>('RESTAURANTE');
@@ -105,7 +105,7 @@ export default function SuperAdminPage() {
   }, []);
 
   // ─── DATA LOADERS ──────────────────────────────────────────────────
-  const loadEmpresas = useCallback(async () => {
+  const fetchEmpresas = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('empresas')
@@ -156,7 +156,7 @@ export default function SuperAdminPage() {
   useEffect(() => {
     if (rol !== 'SuperAdmin') return;
 
-    loadEmpresas();
+    fetchEmpresas();
     loadTickets();
     loadMetrics();
 
@@ -175,13 +175,13 @@ export default function SuperAdminPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [rol, loadEmpresas, loadTickets, loadMetrics]);
+  }, [rol, fetchEmpresas, loadTickets, loadMetrics]);
 
   // ─── HANDLERS: EMPRESA ─────────────────────────────────────────────
-  const handleCreateEmpresa = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNombre.trim() || !formNit.trim()) {
-      showToast('error', 'Nombre y NIT son obligatorios.');
+      showToast('error', 'Nombre Comercial del Establecimiento y NIT son obligatorios.');
       return;
     }
     setSubmittingEmpresa(true);
@@ -201,14 +201,16 @@ export default function SuperAdminPage() {
       });
       if (error) throw error;
 
-      showToast('success', `Empresa "${formNombre}" registrada exitosamente.`);
+      showToast('success', `Negocio "${formNombre}" registrado exitosamente.`);
       setFormNombre('');
       setFormNit('');
       setFormLimiteUsuarios('3');
-      await loadEmpresas();
+      
+      // Re-fetch obligatorio post-inserción
+      await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
-      showToast('error', err.message || 'Error al crear empresa.');
+      showToast('error', err.message || 'Error al registrar el negocio.');
     } finally {
       setSubmittingEmpresa(false);
     }
@@ -219,7 +221,7 @@ export default function SuperAdminPage() {
       const planVal = newPlan === 'Premium' ? 450.00 : newPlan === 'Medio' ? 280.00 : 140.00;
       const { error } = await supabase.from('empresas').update({ plan_suscripcion: newPlan, plan_mensual: planVal }).eq('id', id);
       if (error) throw error;
-      await loadEmpresas();
+      await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
       console.error('Error al actualizar plan:', err);
@@ -230,7 +232,7 @@ export default function SuperAdminPage() {
     try {
       const { error } = await supabase.from('empresas').update({ estado_cuenta: newEstado }).eq('id', id);
       if (error) throw error;
-      await loadEmpresas();
+      await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
       console.error('Error al actualizar estado:', err);
@@ -362,7 +364,10 @@ export default function SuperAdminPage() {
   };
 
   // ─── COMPUTED ──────────────────────────────────────────────────────
-  const empresasFiltradas = empresas.filter(e => e.giro === tabDirectorio);
+  // Filtro robusto e insensible a discrepancias menores de mayúsculas/minúsculas y espacios
+  const empresasFiltradas = empresas.filter(
+    e => (e.giro || '').trim().toUpperCase() === tabDirectorio.toUpperCase()
+  );
   const ticketsAbiertos = tickets.filter(t => t.estado !== 'Resuelto').length;
 
   // ─── RENDER HELPERS ────────────────────────────────────────────────
@@ -449,7 +454,7 @@ export default function SuperAdminPage() {
             </div>
 
             <button
-              onClick={() => { loadEmpresas(); loadTickets(); loadMetrics(); }}
+              onClick={() => { fetchEmpresas(); loadTickets(); loadMetrics(); }}
               className="rounded-lg border-[0.5px] border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-all"
             >
               ↻ Actualizar
@@ -526,7 +531,7 @@ export default function SuperAdminPage() {
                 >
                   🍽️ Restaurantes
                   <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
-                    {empresas.filter(e => e.giro === 'RESTAURANTE').length}
+                    {empresas.filter(e => (e.giro || '').trim().toUpperCase() === 'RESTAURANTE').length}
                   </span>
                 </button>
                 <button
@@ -539,7 +544,7 @@ export default function SuperAdminPage() {
                 >
                   ☕ Cafeterías
                   <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
-                    {empresas.filter(e => e.giro === 'CAFETERIA').length}
+                    {empresas.filter(e => (e.giro || '').trim().toUpperCase() === 'CAFETERIA').length}
                   </span>
                 </button>
               </div>
@@ -561,14 +566,14 @@ export default function SuperAdminPage() {
                     <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-600">
                       <span className="text-3xl mb-3">{tabDirectorio === 'RESTAURANTE' ? '🍽️' : '☕'}</span>
                       <p className="text-[12px] font-normal">No hay {tabDirectorio === 'RESTAURANTE' ? 'restaurantes' : 'cafeterías'} registrados.</p>
-                      <p className="text-[11px] text-zinc-700 mt-1">Use el formulario lateral para aprovisionar uno nuevo.</p>
+                      <p className="text-[11px] text-zinc-700 mt-1">Use el formulario lateral para registrar uno nuevo.</p>
                     </div>
                   ) : (
                     <table className="w-full text-[12px] border-collapse text-left">
                       <thead>
                         <tr className="border-b-[0.5px] border-zinc-800 bg-zinc-900/30 text-zinc-500 font-medium uppercase tracking-wider text-[9px]">
                           <th className="px-4 py-3 font-medium">ID</th>
-                          <th className="px-4 py-3 font-medium">Razón Social</th>
+                          <th className="px-4 py-3 font-medium">Nombre Comercial</th>
                           <th className="px-4 py-3 font-medium">NIT</th>
                           <th className="px-4 py-3 font-medium">Licencias</th>
                           <th className="px-4 py-3 font-medium">Plan</th>
@@ -624,16 +629,16 @@ export default function SuperAdminPage() {
             {/* ─── RIGHT: FORMS PANEL ─── */}
             <div className="lg:col-span-4 flex flex-col gap-4">
 
-              {/* Form 1: Aprovisionar Empresa */}
+              {/* Form 1: Registrar Nuevo Negocio */}
               <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
                 <h2 className="text-[12px] font-semibold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
                   <span className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/15 text-[10px]">+</span>
-                  Aprovisionar Empresa
+                  Registrar Nuevo Negocio
                 </h2>
 
-                <form onSubmit={handleCreateEmpresa} className="space-y-3">
+                <form onSubmit={handleSubmit} className="space-y-3">
                   <div>
-                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Razón Social *</label>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Nombre Comercial del Establecimiento *</label>
                     <input
                       type="text"
                       required
@@ -683,7 +688,7 @@ export default function SuperAdminPage() {
                   </div>
 
                   <div>
-                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Límite de Usuarios (Licencias) *</label>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Cupo de Empleados Permitidos *</label>
                     <input
                       type="number"
                       min="1"
@@ -700,7 +705,7 @@ export default function SuperAdminPage() {
                     disabled={submittingEmpresa}
                     className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 py-2.5 text-[12px] font-medium text-white transition-all active:scale-[0.98] disabled:opacity-40"
                   >
-                    {submittingEmpresa ? 'Aprovisionando...' : 'Crear Inquilino'}
+                    {submittingEmpresa ? 'Aprovisionando...' : 'Activar Negocio y Generar Licencia'}
                   </button>
                 </form>
               </div>
@@ -792,7 +797,7 @@ export default function SuperAdminPage() {
         )}
 
         {/* ═══════════════════════════════════════════════════════════════════
-             TAB 2: BUZÓN GLOBAL DE SOPORTE TÉCNICO (Módulo A)
+             TAB 2: BUZÓN GLOBAL DE SOPORTE TÉCNICO
         ═══════════════════════════════════════════════════════════════════ */}
         {tabPrincipal === 'tickets' && (
           <div className="flex flex-col gap-4">
@@ -923,7 +928,7 @@ export default function SuperAdminPage() {
         )}
 
         {/* ═══════════════════════════════════════════════════════════════════
-             TAB 3: EMISIÓN DE ALERTAS DE INFRAESTRUCTURA (Módulo B)
+             TAB 3: EMISIÓN DE ALERTAS DE INFRAESTRUCTURA
         ═══════════════════════════════════════════════════════════════════ */}
         {tabPrincipal === 'alertas' && (
           <div className="grid gap-6 lg:grid-cols-12">

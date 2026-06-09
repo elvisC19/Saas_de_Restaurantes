@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { RolUsuario } from '@/types/database';
 import { supabase } from '@/lib/supabase';
-import { initDatabaseSeed } from '@/lib/db-init';
+
 
 interface AuthContextType {
   rol: RolUsuario | null;
@@ -63,8 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
-      // 3. Semillar datos si es necesario
-      await initDatabaseSeed(userData.empresa_id);
+
 
       return {
         rol: userData.rol as RolUsuario,
@@ -241,10 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       localStorage.setItem('empresaId', String(userEmpresaId));
 
-      // 3. Inicializar semillado de base de datos si aplica
-      if (userData.empresa_id) {
-        await initDatabaseSeed(userData.empresa_id);
-      }
+
 
       return {
         rol: userRol,
