@@ -62,23 +62,11 @@ export default function CocinaPage() {
     if (!rol || !giro) return;
     loadActiveOrders();
     const channel = supabase
-      .channel('kds-realtime')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
-        (payload) => {
-          console.log('Nuevo pedido recibido:', payload);
-          loadActiveOrders();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
-        (payload) => {
-          console.log('Pedido actualizado:', payload);
-          loadActiveOrders();
-        }
-      )
+      .channel('schema-db-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos' }, (payload) => {
+        console.log('¡Cambio detectado en tiempo real!', payload);
+        loadActiveOrders();
+      })
       .subscribe();
     return () => {
       supabase.removeChannel(channel);

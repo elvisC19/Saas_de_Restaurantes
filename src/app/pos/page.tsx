@@ -104,7 +104,7 @@ export default function PosPage() {
     try {
       const { data: pedidoData, error: pedidoError } = await supabase
         .from('pedidos')
-        .insert([{ empresa_id: empresaId, total: totalStr, estado: 'Pendiente' }])
+        .insert([{ empresa_id: 1, total: totalStr, estado: 'Pendiente' }])
         .select()
         .single();
       if (pedidoError) throw pedidoError;
