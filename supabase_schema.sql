@@ -242,5 +242,64 @@ CREATE TABLE IF NOT EXISTS turnos_personal (
     estado VARCHAR(20) DEFAULT 'Abierto' CHECK (estado IN ('Abierto', 'Cerrado'))
 );
 
+-- Campo de cupo de licencias por empresa (Bloque SuperAdmin Soporte)
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS limite_usuarios INT DEFAULT 3;
 
+-- =============================================================================
+-- SISTEMA DE SOPORTE Y COMUNICACIÓN BIDIRECCIONAL
+-- =============================================================================
 
+-- 5. Tabla de Tickets de Soporte (Incidencias desde Caja/Cocina/Admin)
+CREATE TABLE IF NOT EXISTS tickets_soporte (
+    id SERIAL PRIMARY KEY,
+    empresa_id INT REFERENCES empresas(id) ON DELETE CASCADE,
+    emisor_nombre VARCHAR(100) NOT NULL,
+    emisor_rol VARCHAR(20) NOT NULL CHECK (emisor_rol IN ('Administrador', 'Cajero', 'Cocina')),
+    pantalla_origen VARCHAR(100) NOT NULL,          -- Ej: 'POS - Caja', 'Cocina - Comandas', 'Admin - Inventario'
+    gravedad VARCHAR(10) NOT NULL CHECK (gravedad IN ('Critica', 'Media', 'Baja')),
+    descripcion TEXT NOT NULL,
+    estado VARCHAR(20) DEFAULT 'Abierto' CHECK (estado IN ('Abierto', 'En Progreso', 'Resuelto')),
+    creado_at TIMESTAMP DEFAULT NOW(),
+    resuelto_at TIMESTAMP NULL
+);
+
+-- 6. Tabla de Alertas del Sistema (Emisión desde SuperAdmin hacia los Locales)
+CREATE TABLE IF NOT EXISTS alertas_sistema (
+    id SERIAL PRIMARY KEY,
+    titulo VARCHAR(200) NOT NULL,
+    mensaje TEXT NOT NULL,
+    tipo_alcance VARCHAR(20) NOT NULL CHECK (tipo_alcance IN ('Global', 'Empresa', 'Rol')),
+    empresa_destino_id INT REFERENCES empresas(id) ON DELETE CASCADE,  -- NULL si es Global o por Rol
+    rol_destino VARCHAR(20) CHECK (rol_destino IN ('Administrador', 'Cajero', 'Cocina')),  -- NULL si es Global o por Empresa
+    prioridad VARCHAR(10) DEFAULT 'Normal' CHECK (prioridad IN ('Urgente', 'Normal', 'Informativa')),
+    emitido_por VARCHAR(100) DEFAULT 'SuperAdmin',
+    creado_at TIMESTAMP DEFAULT NOW()
+);
+
+-- =============================================================================
+-- MÓDULOS DEL PANEL DE ADMINISTRACIÓN
+-- =============================================================================
+
+-- 7. Movimientos de Caja (Egresos de Emergencia y flujo gerencial)
+CREATE TABLE IF NOT EXISTS movimientos_caja (
+    id SERIAL PRIMARY KEY,
+    empresa_id INT REFERENCES empresas(id) ON DELETE CASCADE,
+    tipo VARCHAR(10) NOT NULL CHECK (tipo IN ('Ingreso', 'Egreso')),
+    monto NUMERIC(10,2) NOT NULL,
+    concepto VARCHAR(200) NOT NULL,
+    registrado_por VARCHAR(100) NOT NULL,
+    creado_at TIMESTAMP DEFAULT NOW()
+);
+
+-- 8. Asistencia de Personal (Control de horas trabajadas)
+CREATE TABLE IF NOT EXISTS asistencia_personal (
+    id SERIAL PRIMARY KEY,
+    empresa_id INT REFERENCES empresas(id) ON DELETE CASCADE,
+    usuario_id UUID REFERENCES usuarios(id) ON DELETE CASCADE,
+    nombre_empleado VARCHAR(100) NOT NULL,
+    rol_empleado VARCHAR(20) NOT NULL CHECK (rol_empleado IN ('Administrador', 'Cajero', 'Cocina')),
+    hora_entrada TIMESTAMP NOT NULL DEFAULT NOW(),
+    hora_salida TIMESTAMP NULL,
+    costo_hora NUMERIC(10,2) DEFAULT 15.00,
+    creado_at TIMESTAMP DEFAULT NOW()
+);

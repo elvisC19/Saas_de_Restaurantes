@@ -1,21 +1,39 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { formatCurrency } from '@/lib/math';
 
+// ─── TYPES ──────────────────────────────────────────────────────────
 interface SuperAdminEmpresa {
   id: number;
   nombre: string;
+  nit?: string;
+  giro: 'CAFETERIA' | 'RESTAURANTE';
   plan_mensual: string;
   plan_suscripcion?: 'Basico' | 'Medio' | 'Premium';
   estado_cuenta?: 'Activo' | 'Suspendido' | 'Demo';
   subdominio?: string;
   total_licencias?: number;
-  nit?: string;
+  limite_usuarios?: number;
   creado_at?: string;
+}
+
+interface TicketSoporte {
+  id: number;
+  empresa_id: number;
+  emisor_nombre: string;
+  emisor_rol: 'Administrador' | 'Cajero' | 'Cocina';
+  pantalla_origen: string;
+  gravedad: 'Critica' | 'Media' | 'Baja';
+  descripcion: string;
+  estado: 'Abierto' | 'En Progreso' | 'Resuelto';
+  creado_at: string;
+  resuelto_at: string | null;
+  // Joined
+  empresas?: { nombre: string };
 }
 
 interface SaaSMetrics {
@@ -25,53 +43,99 @@ interface SaaSMetrics {
   gmv: number;
 }
 
+type TabDirectorio = 'RESTAURANTE' | 'CAFETERIA';
+type TabPrincipal = 'directorio' | 'tickets' | 'alertas';
+type AlcanceAlerta = 'Global' | 'Empresa' | 'Rol';
+
+// ─── COMPONENT ──────────────────────────────────────────────────────
 export default function SuperAdminPage() {
   const { rol, loading: authLoading } = useAuth();
   const router = useRouter();
 
+  // ── Main Navigation ──
+  const [tabPrincipal, setTabPrincipal] = useState<TabPrincipal>('directorio');
+  const [tabDirectorio, setTabDirectorio] = useState<TabDirectorio>('RESTAURANTE');
+
+  // ── Data ──
   const [empresas, setEmpresas] = useState<SuperAdminEmpresa[]>([]);
-  const [metrics, setMetrics] = useState<SaaSMetrics>({
-    totalTenants: 0,
-    activeTenants: 0,
-    mrr: 0,
-    gmv: 0,
-  });
-  const [loadingList, setLoadingList] = useState(true);
+  const [tickets, setTickets] = useState<TicketSoporte[]>([]);
+  const [metrics, setMetrics] = useState<SaaSMetrics>({ totalTenants: 0, activeTenants: 0, mrr: 0, gmv: 0 });
+  const [loadingEmpresas, setLoadingEmpresas] = useState(true);
+  const [loadingTickets, setLoadingTickets] = useState(true);
 
-  // Form State
-  const [nombre, setNombre] = useState('');
-  const [nit, setNit] = useState('');
-  const [subdomain, setSubdomain] = useState('');
-  const [plan, setPlan] = useState<'Basico' | 'Medio' | 'Premium'>('Basico');
+  // ── Form: Aprovisionar Empresa ──
+  const [formNombre, setFormNombre] = useState('');
+  const [formNit, setFormNit] = useState('');
+  const [formGiro, setFormGiro] = useState<'RESTAURANTE' | 'CAFETERIA'>('RESTAURANTE');
+  const [formPlan, setFormPlan] = useState<'Basico' | 'Medio' | 'Premium'>('Basico');
+  const [formLimiteUsuarios, setFormLimiteUsuarios] = useState('3');
+  const [submittingEmpresa, setSubmittingEmpresa] = useState(false);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  // ── Form: Crear Usuario Operativo ──
+  const [userEmail, setUserEmail] = useState('');
+  const [userPassword, setUserPassword] = useState('');
+  const [userNombre, setUserNombre] = useState('');
+  const [userEmpresaId, setUserEmpresaId] = useState('');
+  const [userRol, setUserRol] = useState<'Cajero' | 'Cocina'>('Cajero');
+  const [submittingUser, setSubmittingUser] = useState(false);
 
-  // Redirección si no es SuperAdmin
+  // ── Form: Emitir Alerta ──
+  const [alertaTitulo, setAlertaTitulo] = useState('');
+  const [alertaMensaje, setAlertaMensaje] = useState('');
+  const [alertaAlcance, setAlertaAlcance] = useState<AlcanceAlerta>('Global');
+  const [alertaEmpresaId, setAlertaEmpresaId] = useState('');
+  const [alertaRol, setAlertaRol] = useState<'Cajero' | 'Cocina' | 'Administrador'>('Cajero');
+  const [alertaPrioridad, setAlertaPrioridad] = useState<'Urgente' | 'Normal' | 'Informativa'>('Normal');
+  const [submittingAlerta, setSubmittingAlerta] = useState(false);
+
+  // ── Notifications ──
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  // ─── AUTH GUARD ────────────────────────────────────────────────────
   useEffect(() => {
     if (!authLoading && rol !== 'SuperAdmin') {
       router.push('/');
     }
   }, [rol, authLoading, router]);
 
-  const loadEmpresas = async () => {
+  // ─── TOAST HELPER ──────────────────────────────────────────────────
+  const showToast = useCallback((type: 'success' | 'error', msg: string) => {
+    setToast({ type, msg });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // ─── DATA LOADERS ──────────────────────────────────────────────────
+  const loadEmpresas = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('empresas')
         .select('*')
         .order('id', { ascending: true });
-
       if (error) throw error;
       setEmpresas(data || []);
     } catch (err) {
       console.error('Error al cargar empresas:', err);
     } finally {
-      setLoadingList(false);
+      setLoadingEmpresas(false);
     }
-  };
+  }, []);
 
-  const loadMetrics = async () => {
+  const loadTickets = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('tickets_soporte')
+        .select('*, empresas(nombre)')
+        .order('creado_at', { ascending: false });
+      if (error) throw error;
+      setTickets(data || []);
+    } catch (err) {
+      console.error('Error al cargar tickets:', err);
+    } finally {
+      setLoadingTickets(false);
+    }
+  }, []);
+
+  const loadMetrics = useCallback(async () => {
     try {
       const res = await fetch('/api/superadmin/metrics');
       const data = await res.json();
@@ -84,95 +148,249 @@ export default function SuperAdminPage() {
         });
       }
     } catch (err) {
-      console.error('Error al cargar métricas de SaaS:', err);
+      console.error('Error al cargar métricas:', err);
     }
-  };
+  }, []);
 
+  // ─── INITIAL LOAD & REALTIME ───────────────────────────────────────
   useEffect(() => {
-    if (rol === 'SuperAdmin') {
-      loadEmpresas();
-      loadMetrics();
-    }
-  }, [rol]);
+    if (rol !== 'SuperAdmin') return;
 
-  const handleCreateTenant = async (e: React.FormEvent) => {
+    loadEmpresas();
+    loadTickets();
+    loadMetrics();
+
+    // Realtime subscription for tickets_soporte
+    const channel = supabase
+      .channel('superadmin-tickets-rt')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tickets_soporte' },
+        () => {
+          loadTickets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [rol, loadEmpresas, loadTickets, loadMetrics]);
+
+  // ─── HANDLERS: EMPRESA ─────────────────────────────────────────────
+  const handleCreateEmpresa = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nombre || !nit) {
-      setErrorMsg('Por favor completa los campos obligatorios.');
+    if (!formNombre.trim() || !formNit.trim()) {
+      showToast('error', 'Nombre y NIT son obligatorios.');
       return;
     }
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
+    setSubmittingEmpresa(true);
     try {
-      const computedSubdomain = subdomain.trim() || nombre.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const planVal = plan === 'Premium' ? 450.00 : plan === 'Medio' ? 280.00 : 140.00;
+      const planVal = formPlan === 'Premium' ? 450.00 : formPlan === 'Medio' ? 280.00 : 140.00;
+      const computedSubdomain = formNombre.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-      const { error } = await supabase
-        .from('empresas')
-        .insert({
-          nombre: nombre.trim(),
-          nit: nit.trim(),
-          subdominio: computedSubdomain,
-          plan_suscripcion: plan,
-          estado_cuenta: 'Activo',
-          plan_mensual: planVal
-        });
-
+      const { error } = await supabase.from('empresas').insert({
+        nombre: formNombre.trim(),
+        nit: formNit.trim(),
+        giro: formGiro,
+        plan_suscripcion: formPlan,
+        plan_mensual: planVal,
+        estado_cuenta: 'Activo',
+        subdominio: computedSubdomain,
+        limite_usuarios: parseInt(formLimiteUsuarios) || 3,
+      });
       if (error) throw error;
 
-      setSuccessMsg(`Empresa "${nombre}" registrada con éxito.`);
-      setNombre('');
-      setNit('');
-      setSubdomain('');
-      setPlan('Basico');
-      
+      showToast('success', `Empresa "${formNombre}" registrada exitosamente.`);
+      setFormNombre('');
+      setFormNit('');
+      setFormLimiteUsuarios('3');
       await loadEmpresas();
       await loadMetrics();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error al crear la empresa.');
+      showToast('error', err.message || 'Error al crear empresa.');
     } finally {
-      setSubmitting(false);
+      setSubmittingEmpresa(false);
     }
   };
 
   const handleUpdatePlan = async (id: number, newPlan: 'Basico' | 'Medio' | 'Premium') => {
     try {
       const planVal = newPlan === 'Premium' ? 450.00 : newPlan === 'Medio' ? 280.00 : 140.00;
-      const { error } = await supabase
-        .from('empresas')
-        .update({
-          plan_suscripcion: newPlan,
-          plan_mensual: planVal
-        })
-        .eq('id', id);
-
+      const { error } = await supabase.from('empresas').update({ plan_suscripcion: newPlan, plan_mensual: planVal }).eq('id', id);
       if (error) throw error;
       await loadEmpresas();
       await loadMetrics();
     } catch (err: any) {
-      console.error('Error al mutar plan en caliente:', err);
+      console.error('Error al actualizar plan:', err);
     }
   };
 
   const handleUpdateEstado = async (id: number, newEstado: 'Activo' | 'Suspendido' | 'Demo') => {
     try {
-      const { error } = await supabase
-        .from('empresas')
-        .update({
-          estado_cuenta: newEstado
-        })
-        .eq('id', id);
-
+      const { error } = await supabase.from('empresas').update({ estado_cuenta: newEstado }).eq('id', id);
       if (error) throw error;
       await loadEmpresas();
       await loadMetrics();
     } catch (err: any) {
-      console.error('Error al mutar estado de cuenta en caliente:', err);
+      console.error('Error al actualizar estado:', err);
     }
   };
 
+  // ─── HANDLERS: USUARIO OPERATIVO ───────────────────────────────────
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userEmail.trim() || !userPassword.trim() || !userNombre.trim() || !userEmpresaId) {
+      showToast('error', 'Todos los campos del usuario son obligatorios.');
+      return;
+    }
+
+    const targetEmpresa = empresas.find(emp => emp.id === parseInt(userEmpresaId));
+    if (!targetEmpresa) {
+      showToast('error', 'La empresa seleccionada no existe.');
+      return;
+    }
+
+    // Validate license cap
+    const limite = targetEmpresa.limite_usuarios || 3;
+    const { data: currentUsers, error: countErr } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('empresa_id', parseInt(userEmpresaId));
+
+    if (countErr) {
+      showToast('error', 'Error al verificar licencias.');
+      return;
+    }
+    if ((currentUsers?.length || 0) >= limite) {
+      showToast('error', `Cupo de licencias agotado (${limite}/${limite}). Aumente el límite de la empresa.`);
+      return;
+    }
+
+    setSubmittingUser(true);
+    try {
+      // Create auth user via Supabase Admin API (client-side workaround: use signUp)
+      const { data: authData, error: authErr } = await supabase.auth.signUp({
+        email: userEmail.trim(),
+        password: userPassword.trim(),
+      });
+      if (authErr) throw authErr;
+      if (!authData.user) throw new Error('No se pudo crear el usuario de autenticación.');
+
+      // Insert into usuarios table
+      const { error: profileErr } = await supabase.from('usuarios').insert({
+        id: authData.user.id,
+        empresa_id: parseInt(userEmpresaId),
+        nombre: userNombre.trim(),
+        rol: userRol,
+      });
+      if (profileErr) throw profileErr;
+
+      showToast('success', `Usuario "${userNombre}" (${userRol}) creado y vinculado a empresa #${userEmpresaId}.`);
+      setUserEmail('');
+      setUserPassword('');
+      setUserNombre('');
+      setUserEmpresaId('');
+    } catch (err: any) {
+      showToast('error', err.message || 'Error al crear usuario operativo.');
+    } finally {
+      setSubmittingUser(false);
+    }
+  };
+
+  // ─── HANDLERS: TICKETS ─────────────────────────────────────────────
+  const handleTicketStatusChange = async (ticketId: number, nuevoEstado: 'En Progreso' | 'Resuelto') => {
+    try {
+      const updatePayload: any = { estado: nuevoEstado };
+      if (nuevoEstado === 'Resuelto') {
+        updatePayload.resuelto_at = new Date().toISOString();
+      }
+      const { error } = await supabase.from('tickets_soporte').update(updatePayload).eq('id', ticketId);
+      if (error) throw error;
+      showToast('success', `Ticket #${ticketId} → ${nuevoEstado}`);
+      await loadTickets();
+    } catch (err: any) {
+      showToast('error', err.message || 'Error al actualizar ticket.');
+    }
+  };
+
+  // ─── HANDLERS: ALERTAS ─────────────────────────────────────────────
+  const handleEmitirAlerta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!alertaTitulo.trim() || !alertaMensaje.trim()) {
+      showToast('error', 'Título y mensaje son obligatorios.');
+      return;
+    }
+    if (alertaAlcance === 'Empresa' && !alertaEmpresaId) {
+      showToast('error', 'Seleccione una empresa destino.');
+      return;
+    }
+
+    setSubmittingAlerta(true);
+    try {
+      const payload: any = {
+        titulo: alertaTitulo.trim(),
+        mensaje: alertaMensaje.trim(),
+        tipo_alcance: alertaAlcance,
+        prioridad: alertaPrioridad,
+        emitido_por: 'SuperAdmin',
+      };
+
+      if (alertaAlcance === 'Empresa') {
+        payload.empresa_destino_id = parseInt(alertaEmpresaId);
+      }
+      if (alertaAlcance === 'Rol') {
+        payload.rol_destino = alertaRol;
+      }
+
+      const { error } = await supabase.from('alertas_sistema').insert(payload);
+      if (error) throw error;
+
+      const destino = alertaAlcance === 'Global' ? 'todo el SaaS' :
+        alertaAlcance === 'Empresa' ? `empresa #${alertaEmpresaId}` :
+        `rol ${alertaRol}`;
+      showToast('success', `Alerta emitida hacia ${destino}.`);
+      setAlertaTitulo('');
+      setAlertaMensaje('');
+      setAlertaAlcance('Global');
+      setAlertaEmpresaId('');
+    } catch (err: any) {
+      showToast('error', err.message || 'Error al emitir alerta.');
+    } finally {
+      setSubmittingAlerta(false);
+    }
+  };
+
+  // ─── COMPUTED ──────────────────────────────────────────────────────
+  const empresasFiltradas = empresas.filter(e => e.giro === tabDirectorio);
+  const ticketsAbiertos = tickets.filter(t => t.estado !== 'Resuelto').length;
+
+  // ─── RENDER HELPERS ────────────────────────────────────────────────
+  const formatTimestamp = (ts: string) => {
+    const d = new Date(ts);
+    return d.toLocaleDateString('es-BO', { day: '2-digit', month: 'short', year: 'numeric' }) +
+      ' ' + d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const gravedadColor = (g: string) => {
+    switch (g) {
+      case 'Critica': return 'bg-red-500/15 text-red-400 border-red-500/20';
+      case 'Media': return 'bg-amber-500/15 text-amber-400 border-amber-500/20';
+      case 'Baja': return 'bg-sky-500/15 text-sky-400 border-sky-500/20';
+      default: return 'bg-zinc-500/15 text-zinc-400 border-zinc-500/20';
+    }
+  };
+
+  const estadoTicketColor = (e: string) => {
+    switch (e) {
+      case 'Abierto': return 'text-red-400';
+      case 'En Progreso': return 'text-amber-400';
+      case 'Resuelto': return 'text-emerald-400';
+      default: return 'text-zinc-400';
+    }
+  };
+
+  // ─── LOADING GUARD ─────────────────────────────────────────────────
   if (authLoading || rol !== 'SuperAdmin') {
     return (
       <div className="flex flex-1 items-center justify-center min-h-screen bg-zinc-950 text-zinc-500">
@@ -184,23 +402,44 @@ export default function SuperAdminPage() {
     );
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  //  RENDER
+  // ═══════════════════════════════════════════════════════════════════
   return (
-    <div className="flex flex-1 flex-col bg-zinc-950 overflow-y-auto">
-      <div className="mx-auto w-full max-w-6xl p-6 lg:p-8 space-y-6">
-        
-        {/* Header con Indicador de Red Activo */}
+    <div className="flex flex-1 flex-col bg-zinc-950 overflow-y-auto min-h-screen">
+
+      {/* ─── TOAST ─── */}
+      {toast && (
+        <div className={`fixed top-5 right-5 z-[100] max-w-sm rounded-lg border-[0.5px] px-5 py-3.5 text-[12px] font-medium shadow-2xl transition-all animate-[slideIn_0.3s_ease-out] ${
+          toast.type === 'success'
+            ? 'border-emerald-500/20 bg-emerald-950/90 text-emerald-300 backdrop-blur-lg'
+            : 'border-rose-500/20 bg-rose-950/90 text-rose-300 backdrop-blur-lg'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span>{toast.type === 'success' ? '✓' : '✕'}</span>
+            <span>{toast.msg}</span>
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto w-full max-w-[1440px] p-6 lg:p-8 space-y-6">
+
+        {/* ═══ HEADER ═══ */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b-[0.5px] border-zinc-800 pb-5">
           <div>
-            <h1 className="text-[20px] font-medium text-white tracking-tight flex items-center gap-2">
-              Consola Maestra Global
+            <h1 className="text-[20px] font-semibold text-white tracking-tight flex items-center gap-2.5">
+              Consola de Infraestructura Global
               <span className="rounded-full border-[0.5px] border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[9px] font-medium text-emerald-400 uppercase tracking-wider">
                 SuperAdmin
               </span>
             </h1>
+            <p className="mt-1 text-[11px] text-zinc-500 font-normal">
+              Gestión SaaS Multi-Tenant · Soporte Bidireccional · Alertas de Infraestructura
+            </p>
           </div>
-          
+
           <div className="flex items-center gap-2">
-            {/* Indicador de Red Activo con ping animado doble */}
+            {/* Network Indicator */}
             <div className="flex items-center gap-2 rounded-full border-[0.5px] border-zinc-800 bg-zinc-900/40 px-3 py-1.5 text-[11px] font-normal text-emerald-400">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
@@ -208,198 +447,689 @@ export default function SuperAdminPage() {
               </span>
               <span>Red Activa</span>
             </div>
-            
-            <button 
-              onClick={() => { loadEmpresas(); loadMetrics(); }}
-              className="rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:text-white transition-all"
+
+            <button
+              onClick={() => { loadEmpresas(); loadTickets(); loadMetrics(); }}
+              className="rounded-lg border-[0.5px] border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[11px] font-medium text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition-all"
             >
-              Actualizar Consola
+              ↻ Actualizar
             </button>
           </div>
         </div>
 
-        {/* Grid de KPIs SuperAdmin */}
+        {/* ═══ KPI STRIP ═══ */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            { label: 'Inquilinos Totales', value: `${metrics.totalTenants}` },
-            { label: 'Suscripciones Activas', value: `${metrics.activeTenants}` },
-            { label: 'MRR Consolidado', value: formatCurrency(metrics.mrr) },
-            { label: 'GMV Ventas Gastro', value: formatCurrency(metrics.gmv) },
+            { label: 'Inquilinos Totales', value: `${metrics.totalTenants}`, icon: '🏢' },
+            { label: 'Suscripciones Activas', value: `${metrics.activeTenants}`, icon: '✅' },
+            { label: 'MRR Consolidado', value: formatCurrency(metrics.mrr), icon: '💰' },
+            { label: 'Tickets Abiertos', value: `${ticketsAbiertos}`, icon: '🎫' },
           ].map((kpi, i) => (
-            <div
-              key={i}
-              className="rounded-[var(--radius-md)] border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5"
-            >
-              <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">{kpi.label}</span>
-              <p className="mt-2 text-[22px] font-medium text-[var(--accent)] tracking-tight leading-none">{kpi.value}</p>
+            <div key={i} className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5 hover:bg-zinc-900/60 transition-colors">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-zinc-500">{kpi.label}</span>
+                <span className="text-sm">{kpi.icon}</span>
+              </div>
+              <p className="mt-2 text-[22px] font-semibold text-white tracking-tight leading-none">{kpi.value}</p>
             </div>
           ))}
         </div>
 
-        {/* Dos columnas de Gestión */}
-        <div className="grid gap-6 lg:grid-cols-12">
-          
-          {/* Tabla de Gestión de Tenants */}
-          <div className="lg:col-span-8 flex flex-col rounded-[var(--radius-lg)] border-[0.5px] border-zinc-800 bg-zinc-900/40 overflow-hidden">
-            <div className="px-5 py-4 border-b-[0.5px] border-zinc-800 bg-zinc-900/10">
-              <h2 className="text-[13px] font-medium text-white uppercase tracking-wider">
-                Gestión de Tenants
-              </h2>
-            </div>
-
-            <div className="flex-1 overflow-x-auto">
-              {loadingList ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="h-6 w-6 border-2 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
-                </div>
-              ) : empresas.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-600">
-                  <p className="text-[12px] font-normal">No hay empresas registradas.</p>
-                </div>
-              ) : (
-                <table className="w-full text-[12px] border-collapse text-left">
-                  <thead>
-                    <tr className="border-b-[0.5px] border-zinc-800 bg-zinc-900/20 text-zinc-500 font-medium uppercase tracking-wider text-[9px]">
-                      <th className="px-5 py-3 font-medium">ID</th>
-                      <th className="px-5 py-3 font-medium">Razón Social</th>
-                      <th className="px-5 py-3 font-medium">NIT</th>
-                      <th className="px-5 py-3 font-medium">Subdominio</th>
-                      <th className="px-5 py-3 font-medium">Plan</th>
-                      <th className="px-5 py-3 font-medium">Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y-[0.5px] divide-zinc-800">
-                    {empresas.map((emp) => (
-                      <tr key={emp.id} className="hover:bg-zinc-900/35 transition-colors">
-                        <td className="px-5 py-3.5 font-mono text-zinc-500">#{emp.id}</td>
-                        <td className="px-5 py-3.5 text-white font-medium">{emp.nombre}</td>
-                        <td className="px-5 py-3.5 text-zinc-400 font-normal">{emp.nit || '—'}</td>
-                        <td className="px-5 py-3.5 text-zinc-400 font-normal font-mono">{emp.subdominio || '—'}</td>
-                        <td className="px-5 py-3.5">
-                          <select
-                            value={emp.plan_suscripcion || 'Basico'}
-                            onChange={(e) => handleUpdatePlan(emp.id, e.target.value as any)}
-                            className="bg-zinc-950 border-[0.5px] border-zinc-800 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] text-[var(--accent-light)] font-normal outline-none focus:border-[var(--accent)]"
-                          >
-                            <option value="Basico">Básico (140 BOB)</option>
-                            <option value="Medio">Medio (280 BOB)</option>
-                            <option value="Premium">Premium (450 BOB)</option>
-                          </select>
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <select
-                            value={emp.estado_cuenta || 'Activo'}
-                            onChange={(e) => handleUpdateEstado(emp.id, e.target.value as any)}
-                            className={`bg-zinc-950 border-[0.5px] border-zinc-800 rounded-[var(--radius-sm)] px-2 py-1 text-[11px] font-normal outline-none focus:border-[var(--accent)] ${
-                              emp.estado_cuenta === 'Activo'
-                                ? 'text-emerald-400'
-                                : emp.estado_cuenta === 'Suspendido'
-                                ? 'text-rose-400'
-                                : 'text-amber-400'
-                            }`}
-                          >
-                            <option value="Activo">🟢 Activo</option>
-                            <option value="Suspendido">🔴 Suspendido</option>
-                            <option value="Demo">🟡 Demo</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        {/* ═══ MAIN TAB NAVIGATION ═══ */}
+        <div className="flex items-center gap-1 rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/30 p-1">
+          {([
+            { key: 'directorio' as TabPrincipal, label: '📋 Directorio de Empresas', badge: empresas.length },
+            { key: 'tickets' as TabPrincipal, label: '🎫 Buzón de Soporte', badge: ticketsAbiertos },
+            { key: 'alertas' as TabPrincipal, label: '📡 Emisión de Alertas', badge: null },
+          ]).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setTabPrincipal(tab.key)}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-[12px] font-medium transition-all ${
+                tabPrincipal === tab.key
+                  ? 'bg-zinc-800 text-white shadow-lg'
+                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30'
+              }`}
+            >
+              {tab.label}
+              {tab.badge !== null && tab.badge > 0 && (
+                <span className={`ml-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-medium ${
+                  tab.key === 'tickets' && ticketsAbiertos > 0
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-zinc-700 text-zinc-300'
+                }`}>
+                  {tab.badge}
+                </span>
               )}
-            </div>
-          </div>
-
-          {/* Formulario Lateral de Aprovisionamiento */}
-          <div className="lg:col-span-4 rounded-[var(--radius-lg)] border-[0.5px] border-zinc-800 bg-zinc-900/40 p-6 flex flex-col justify-between">
-            <div>
-              <h2 className="text-[13px] font-medium text-white uppercase tracking-wider mb-5">
-                Aprovisionar Tenant
-              </h2>
-
-              {errorMsg && (
-                <div className="mb-4 rounded-[var(--radius-sm)] border-[0.5px] border-rose-500/10 bg-rose-500/5 px-4 py-3 text-[12px] text-rose-400 font-normal">
-                  {errorMsg}
-                </div>
-              )}
-              {successMsg && (
-                <div className="mb-4 rounded-[var(--radius-sm)] border-[0.5px] border-emerald-500/10 bg-emerald-500/5 px-4 py-3 text-[12px] text-emerald-400 font-normal">
-                  {successMsg}
-                </div>
-              )}
-
-              <form onSubmit={handleCreateTenant} className="space-y-4">
-                <div>
-                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
-                    Razón Social
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={nombre}
-                    onChange={(e) => setNombre(e.target.value)}
-                    placeholder="Restaurante Central"
-                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
-                    NIT
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={nit}
-                    onChange={(e) => setNit(e.target.value)}
-                    placeholder="1020304050"
-                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
-                    Subdominio (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={subdomain}
-                    onChange={(e) => setSubdomain(e.target.value)}
-                    placeholder="central"
-                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] placeholder-zinc-700 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">
-                    Plan Inicial
-                  </label>
-                  <select
-                    value={plan}
-                    onChange={(e) => setPlan(e.target.value as any)}
-                    className="w-full rounded-[var(--radius-sm)] border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-[var(--accent)] font-normal"
-                  >
-                    <option value="Basico">Básico (140 BOB)</option>
-                    <option value="Medio">Medio (280 BOB)</option>
-                    <option value="Premium">Premium (450 BOB)</option>
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full rounded-[var(--radius-sm)] bg-[var(--accent)] py-3 text-[12px] font-medium text-white transition-all hover:bg-[var(--accent-dark)] active:scale-[0.98] disabled:opacity-40"
-                >
-                  {submitting ? 'Aprovisionando...' : 'Crear Inquilino'}
-                </button>
-              </form>
-            </div>
-          </div>
-          
+            </button>
+          ))}
         </div>
 
+        {/* ═══════════════════════════════════════════════════════════════════
+             TAB 1: DIRECTORIO DE EMPRESAS
+        ═══════════════════════════════════════════════════════════════════ */}
+        {tabPrincipal === 'directorio' && (
+          <div className="grid gap-6 lg:grid-cols-12">
+
+            {/* ─── LEFT: TABLAS DE DIRECTORIO ─── */}
+            <div className="lg:col-span-8 flex flex-col gap-4">
+
+              {/* Sub-tabs: Restaurante / Cafetería */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTabDirectorio('RESTAURANTE')}
+                  className={`flex items-center gap-1.5 rounded-lg border-[0.5px] px-4 py-2 text-[12px] font-medium transition-all ${
+                    tabDirectorio === 'RESTAURANTE'
+                      ? 'border-orange-500/30 bg-orange-500/10 text-orange-300'
+                      : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  🍽️ Restaurantes
+                  <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
+                    {empresas.filter(e => e.giro === 'RESTAURANTE').length}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setTabDirectorio('CAFETERIA')}
+                  className={`flex items-center gap-1.5 rounded-lg border-[0.5px] px-4 py-2 text-[12px] font-medium transition-all ${
+                    tabDirectorio === 'CAFETERIA'
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                      : 'border-zinc-800 bg-zinc-900/30 text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  ☕ Cafeterías
+                  <span className="ml-1 rounded-full bg-zinc-800 px-1.5 py-0.5 text-[10px]">
+                    {empresas.filter(e => e.giro === 'CAFETERIA').length}
+                  </span>
+                </button>
+              </div>
+
+              {/* Tabla de Empresas */}
+              <div className="flex flex-col rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 overflow-hidden">
+                <div className="px-5 py-4 border-b-[0.5px] border-zinc-800 bg-zinc-900/20">
+                  <h2 className="text-[13px] font-medium text-white uppercase tracking-wider">
+                    {tabDirectorio === 'RESTAURANTE' ? '🍽️ Directorio de Restaurantes' : '☕ Directorio de Cafeterías'}
+                  </h2>
+                </div>
+
+                <div className="flex-1 overflow-x-auto">
+                  {loadingEmpresas ? (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="h-6 w-6 border-2 border-zinc-800 border-t-emerald-500 rounded-full animate-spin" />
+                    </div>
+                  ) : empresasFiltradas.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-center text-zinc-600">
+                      <span className="text-3xl mb-3">{tabDirectorio === 'RESTAURANTE' ? '🍽️' : '☕'}</span>
+                      <p className="text-[12px] font-normal">No hay {tabDirectorio === 'RESTAURANTE' ? 'restaurantes' : 'cafeterías'} registrados.</p>
+                      <p className="text-[11px] text-zinc-700 mt-1">Use el formulario lateral para aprovisionar uno nuevo.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-[12px] border-collapse text-left">
+                      <thead>
+                        <tr className="border-b-[0.5px] border-zinc-800 bg-zinc-900/30 text-zinc-500 font-medium uppercase tracking-wider text-[9px]">
+                          <th className="px-4 py-3 font-medium">ID</th>
+                          <th className="px-4 py-3 font-medium">Razón Social</th>
+                          <th className="px-4 py-3 font-medium">NIT</th>
+                          <th className="px-4 py-3 font-medium">Licencias</th>
+                          <th className="px-4 py-3 font-medium">Plan</th>
+                          <th className="px-4 py-3 font-medium">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y-[0.5px] divide-zinc-800/60">
+                        {empresasFiltradas.map((emp) => (
+                          <tr key={emp.id} className="hover:bg-zinc-800/20 transition-colors">
+                            <td className="px-4 py-3.5 font-mono text-zinc-500 text-[11px]">#{emp.id}</td>
+                            <td className="px-4 py-3.5 text-white font-medium">{emp.nombre}</td>
+                            <td className="px-4 py-3.5 text-zinc-400 font-normal font-mono text-[11px]">{emp.nit || '—'}</td>
+                            <td className="px-4 py-3.5">
+                              <span className="rounded-md border-[0.5px] border-zinc-700 bg-zinc-800/50 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
+                                {emp.limite_usuarios || '—'} cupos
+                              </span>
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <select
+                                value={emp.plan_suscripcion || 'Basico'}
+                                onChange={(e) => handleUpdatePlan(emp.id, e.target.value as any)}
+                                className="bg-zinc-950 border-[0.5px] border-zinc-800 rounded-lg px-2 py-1 text-[11px] text-emerald-400 font-normal outline-none focus:border-emerald-500/50 cursor-pointer"
+                              >
+                                <option value="Basico">Básico (140 BOB)</option>
+                                <option value="Medio">Medio (280 BOB)</option>
+                                <option value="Premium">Premium (450 BOB)</option>
+                              </select>
+                            </td>
+                            <td className="px-4 py-3.5">
+                              <select
+                                value={emp.estado_cuenta || 'Activo'}
+                                onChange={(e) => handleUpdateEstado(emp.id, e.target.value as any)}
+                                className={`bg-zinc-950 border-[0.5px] border-zinc-800 rounded-lg px-2 py-1 text-[11px] font-normal outline-none focus:border-emerald-500/50 cursor-pointer ${
+                                  emp.estado_cuenta === 'Activo' ? 'text-emerald-400'
+                                    : emp.estado_cuenta === 'Suspendido' ? 'text-rose-400'
+                                    : 'text-amber-400'
+                                }`}
+                              >
+                                <option value="Activo">🟢 Activo</option>
+                                <option value="Suspendido">🔴 Suspendido</option>
+                                <option value="Demo">🟡 Demo</option>
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ─── RIGHT: FORMS PANEL ─── */}
+            <div className="lg:col-span-4 flex flex-col gap-4">
+
+              {/* Form 1: Aprovisionar Empresa */}
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
+                <h2 className="text-[12px] font-semibold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-500/15 text-[10px]">+</span>
+                  Aprovisionar Empresa
+                </h2>
+
+                <form onSubmit={handleCreateEmpresa} className="space-y-3">
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Razón Social *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formNombre}
+                      onChange={(e) => setFormNombre(e.target.value)}
+                      placeholder="Restaurante El Patio"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 placeholder-zinc-700 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">NIT *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formNit}
+                      onChange={(e) => setFormNit(e.target.value)}
+                      placeholder="1020304050"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 placeholder-zinc-700 font-mono transition-colors"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Giro *</label>
+                      <select
+                        value={formGiro}
+                        onChange={(e) => setFormGiro(e.target.value as any)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 cursor-pointer"
+                      >
+                        <option value="RESTAURANTE">🍽️ Restaurante</option>
+                        <option value="CAFETERIA">☕ Cafetería</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Plan</label>
+                      <select
+                        value={formPlan}
+                        onChange={(e) => setFormPlan(e.target.value as any)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 cursor-pointer"
+                      >
+                        <option value="Basico">Básico</option>
+                        <option value="Medio">Medio</option>
+                        <option value="Premium">Premium</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Límite de Usuarios (Licencias) *</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      required
+                      value={formLimiteUsuarios}
+                      onChange={(e) => setFormLimiteUsuarios(e.target.value)}
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-emerald-500/50 font-mono transition-colors"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submittingEmpresa}
+                    className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-500 py-2.5 text-[12px] font-medium text-white transition-all active:scale-[0.98] disabled:opacity-40"
+                  >
+                    {submittingEmpresa ? 'Aprovisionando...' : 'Crear Inquilino'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Form 2: Crear Usuario Operativo */}
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
+                <h2 className="text-[12px] font-semibold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-md bg-sky-500/15 text-[10px]">👤</span>
+                  Crear Usuario Operativo
+                </h2>
+
+                <form onSubmit={handleCreateUser} className="space-y-3">
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Nombre Completo *</label>
+                    <input
+                      type="text"
+                      required
+                      value={userNombre}
+                      onChange={(e) => setUserNombre(e.target.value)}
+                      placeholder="Juan Pérez"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-sky-500/50 placeholder-zinc-700 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Email de Acceso *</label>
+                    <input
+                      type="email"
+                      required
+                      value={userEmail}
+                      onChange={(e) => setUserEmail(e.target.value)}
+                      placeholder="cajero@empresa.com"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-sky-500/50 placeholder-zinc-700 font-mono transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Contraseña *</label>
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={userPassword}
+                      onChange={(e) => setUserPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2 text-[12px] text-white outline-none focus:border-sky-500/50 placeholder-zinc-700 transition-colors"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Empresa Destino *</label>
+                      <select
+                        value={userEmpresaId}
+                        onChange={(e) => setUserEmpresaId(e.target.value)}
+                        required
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-white outline-none focus:border-sky-500/50 cursor-pointer"
+                      >
+                        <option value="">-- Empresa --</option>
+                        {empresas.map(emp => (
+                          <option key={emp.id} value={emp.id}>#{emp.id} {emp.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1">Rol *</label>
+                      <select
+                        value={userRol}
+                        onChange={(e) => setUserRol(e.target.value as any)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-2 py-2 text-[12px] text-white outline-none focus:border-sky-500/50 cursor-pointer"
+                      >
+                        <option value="Cajero">💵 Cajero</option>
+                        <option value="Cocina">🍳 Cocina</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submittingUser}
+                    className="w-full rounded-lg bg-sky-600 hover:bg-sky-500 py-2.5 text-[12px] font-medium text-white transition-all active:scale-[0.98] disabled:opacity-40"
+                  >
+                    {submittingUser ? 'Creando...' : 'Crear Usuario y Vincular'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════
+             TAB 2: BUZÓN GLOBAL DE SOPORTE TÉCNICO (Módulo A)
+        ═══════════════════════════════════════════════════════════════════ */}
+        {tabPrincipal === 'tickets' && (
+          <div className="flex flex-col gap-4">
+
+            {/* Header del Módulo */}
+            <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 px-5 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-[14px] font-semibold text-white flex items-center gap-2">
+                    🎫 Buzón Global de Soporte Técnico
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                    </span>
+                  </h2>
+                  <p className="mt-0.5 text-[11px] text-zinc-500 font-normal">
+                    Lectura en tiempo real · Suscripción activa a <code className="text-zinc-400">tickets_soporte</code>
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-4 text-[10px] font-medium">
+                    <span className="text-red-400">● {tickets.filter(t => t.estado === 'Abierto').length} Abiertos</span>
+                    <span className="text-amber-400">● {tickets.filter(t => t.estado === 'En Progreso').length} En Progreso</span>
+                    <span className="text-emerald-400">● {tickets.filter(t => t.estado === 'Resuelto').length} Resueltos</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Lista de Tickets */}
+            {loadingTickets ? (
+              <div className="flex items-center justify-center py-20">
+                <div className="h-6 w-6 border-2 border-zinc-800 border-t-red-500 rounded-full animate-spin" />
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 flex flex-col items-center justify-center py-20 text-center">
+                <span className="text-4xl mb-3">📭</span>
+                <p className="text-[13px] text-zinc-500 font-normal">No hay tickets de soporte registrados.</p>
+                <p className="text-[11px] text-zinc-700 mt-1">Los operadores pueden reportar incidencias desde sus estaciones de trabajo.</p>
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {tickets.map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    className={`rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5 hover:bg-zinc-900/60 transition-all ${
+                      ticket.estado === 'Resuelto' ? 'opacity-50' : ''
+                    }`}
+                  >
+                    <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+
+                      {/* Left: Info */}
+                      <div className="flex-1 min-w-0 space-y-2.5">
+                        {/* Top row: badges */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {/* Gravedad Badge */}
+                          <span className={`inline-flex items-center gap-1 rounded-md border-[0.5px] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${gravedadColor(ticket.gravedad)}`}>
+                            {ticket.gravedad === 'Critica' && '🔴'}
+                            {ticket.gravedad === 'Media' && '🟡'}
+                            {ticket.gravedad === 'Baja' && '🔵'}
+                            {ticket.gravedad}
+                          </span>
+
+                          {/* Estado Badge */}
+                          <span className={`text-[10px] font-medium ${estadoTicketColor(ticket.estado)}`}>
+                            {ticket.estado}
+                          </span>
+
+                          {/* Ticket ID */}
+                          <span className="text-[10px] text-zinc-600 font-mono">TKT-{String(ticket.id).padStart(4, '0')}</span>
+                        </div>
+
+                        {/* Origen */}
+                        <div className="flex items-center gap-3 text-[11px]">
+                          <span className="text-zinc-500">
+                            <strong className="text-zinc-300">{ticket.empresas?.nombre || `Empresa #${ticket.empresa_id}`}</strong>
+                            {' · '}
+                            <span className="text-orange-400">{ticket.pantalla_origen}</span>
+                          </span>
+                        </div>
+
+                        {/* Emisor y Timestamp */}
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-600">
+                          <span>👤 {ticket.emisor_nombre}</span>
+                          <span>·</span>
+                          <span className="rounded-md bg-zinc-800/50 px-1.5 py-0.5 text-[9px] font-mono">{ticket.emisor_rol}</span>
+                          <span>·</span>
+                          <span>🕐 {formatTimestamp(ticket.creado_at)}</span>
+                        </div>
+
+                        {/* Descripción */}
+                        <div className="rounded-lg border-[0.5px] border-zinc-800/50 bg-zinc-950/60 px-3.5 py-2.5 text-[12px] text-zinc-300 leading-relaxed">
+                          {ticket.descripcion}
+                        </div>
+                      </div>
+
+                      {/* Right: Actions */}
+                      {ticket.estado !== 'Resuelto' && (
+                        <div className="flex lg:flex-col gap-2 shrink-0">
+                          {ticket.estado === 'Abierto' && (
+                            <button
+                              onClick={() => handleTicketStatusChange(ticket.id, 'En Progreso')}
+                              className="rounded-lg border-[0.5px] border-amber-500/30 bg-amber-500/10 px-3.5 py-2 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20 transition-all"
+                            >
+                              ⏳ En Progreso
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleTicketStatusChange(ticket.id, 'Resuelto')}
+                            className="rounded-lg border-[0.5px] border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 transition-all"
+                          >
+                            ✅ Resolver
+                          </button>
+                        </div>
+                      )}
+
+                      {ticket.estado === 'Resuelto' && ticket.resuelto_at && (
+                        <div className="shrink-0 text-[10px] text-emerald-600 font-mono">
+                          Resuelto: {formatTimestamp(ticket.resuelto_at)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════
+             TAB 3: EMISIÓN DE ALERTAS DE INFRAESTRUCTURA (Módulo B)
+        ═══════════════════════════════════════════════════════════════════ */}
+        {tabPrincipal === 'alertas' && (
+          <div className="grid gap-6 lg:grid-cols-12">
+
+            {/* ─── LEFT: Formulario de Emisión ─── */}
+            <div className="lg:col-span-7">
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-6">
+                <h2 className="text-[14px] font-semibold text-white flex items-center gap-2 mb-1">
+                  📡 Panel de Emisión de Alertas de Infraestructura
+                </h2>
+                <p className="text-[11px] text-zinc-500 font-normal mb-5">
+                  Redacte un comunicado y emítalo al sistema. Se insertará en <code className="text-zinc-400">alertas_sistema</code>.
+                </p>
+
+                <form onSubmit={handleEmitirAlerta} className="space-y-4">
+
+                  {/* Título */}
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Título del Comunicado *</label>
+                    <input
+                      type="text"
+                      required
+                      value={alertaTitulo}
+                      onChange={(e) => setAlertaTitulo(e.target.value)}
+                      placeholder="Mantenimiento Programado de Servidores"
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[13px] text-white outline-none focus:border-violet-500/50 placeholder-zinc-700 transition-colors"
+                    />
+                  </div>
+
+                  {/* Mensaje */}
+                  <div>
+                    <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Cuerpo del Mensaje *</label>
+                    <textarea
+                      required
+                      rows={4}
+                      value={alertaMensaje}
+                      onChange={(e) => setAlertaMensaje(e.target.value)}
+                      placeholder="Estimados operadores, se realizará un mantenimiento programado el día..."
+                      className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-4 py-2.5 text-[12px] text-white outline-none focus:border-violet-500/50 placeholder-zinc-700 resize-none leading-relaxed transition-colors"
+                    />
+                  </div>
+
+                  {/* Alcance + Prioridad */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Alcance de Difusión *</label>
+                      <select
+                        value={alertaAlcance}
+                        onChange={(e) => setAlertaAlcance(e.target.value as AlcanceAlerta)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-violet-500/50 cursor-pointer"
+                      >
+                        <option value="Global">🌐 Global (Todo el SaaS)</option>
+                        <option value="Empresa">🏢 Empresa Específica</option>
+                        <option value="Rol">👤 Por Rol Operativo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Prioridad</label>
+                      <select
+                        value={alertaPrioridad}
+                        onChange={(e) => setAlertaPrioridad(e.target.value as any)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-violet-500/50 cursor-pointer"
+                      >
+                        <option value="Urgente">🔴 Urgente</option>
+                        <option value="Normal">🟡 Normal</option>
+                        <option value="Informativa">🔵 Informativa</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Conditional: Empresa Selector */}
+                  {alertaAlcance === 'Empresa' && (
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Empresa Destino *</label>
+                      <select
+                        value={alertaEmpresaId}
+                        onChange={(e) => setAlertaEmpresaId(e.target.value)}
+                        required
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-violet-500/50 cursor-pointer"
+                      >
+                        <option value="">-- Seleccionar Empresa --</option>
+                        {empresas.map(emp => (
+                          <option key={emp.id} value={emp.id}>#{emp.id} · {emp.nombre} ({emp.giro})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Conditional: Rol Selector */}
+                  {alertaAlcance === 'Rol' && (
+                    <div>
+                      <label className="text-[9px] font-medium uppercase tracking-wider text-zinc-500 block mb-1.5">Rol Destino *</label>
+                      <select
+                        value={alertaRol}
+                        onChange={(e) => setAlertaRol(e.target.value as any)}
+                        className="w-full rounded-lg border-[0.5px] border-zinc-800 bg-zinc-950 px-3 py-2.5 text-[12px] text-white outline-none focus:border-violet-500/50 cursor-pointer"
+                      >
+                        <option value="Cajero">💵 Todos los Cajeros</option>
+                        <option value="Cocina">🍳 Todas las Cocinas</option>
+                        <option value="Administrador">📊 Todos los Administradores</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={submittingAlerta}
+                    className="w-full rounded-lg bg-violet-600 hover:bg-violet-500 py-3 text-[13px] font-medium text-white transition-all active:scale-[0.98] disabled:opacity-40"
+                  >
+                    {submittingAlerta ? 'Emitiendo...' : '📡 Emitir Alerta al Sistema'}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* ─── RIGHT: Vista Previa / Ayuda ─── */}
+            <div className="lg:col-span-5 flex flex-col gap-4">
+
+              {/* Preview Card */}
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
+                <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-3">Vista Previa del Comunicado</h3>
+                <div className="rounded-lg border-[0.5px] border-zinc-700/50 bg-zinc-950/80 p-4 space-y-2">
+                  {alertaTitulo ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${
+                          alertaPrioridad === 'Urgente' ? 'bg-red-500' :
+                          alertaPrioridad === 'Normal' ? 'bg-amber-500' : 'bg-sky-500'
+                        }`} />
+                        <h4 className="text-[13px] font-semibold text-white">{alertaTitulo}</h4>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">{alertaMensaje || 'Sin contenido...'}</p>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t-[0.5px] border-zinc-800">
+                        <span className={`rounded-md px-2 py-0.5 text-[9px] font-medium ${
+                          alertaAlcance === 'Global' ? 'bg-violet-500/15 text-violet-400' :
+                          alertaAlcance === 'Empresa' ? 'bg-sky-500/15 text-sky-400' :
+                          'bg-amber-500/15 text-amber-400'
+                        }`}>
+                          {alertaAlcance === 'Global' ? '🌐 Global' :
+                           alertaAlcance === 'Empresa' ? `🏢 Empresa #${alertaEmpresaId || '?'}` :
+                           `👤 Rol: ${alertaRol}`}
+                        </span>
+                        <span className={`rounded-md px-2 py-0.5 text-[9px] font-medium ${
+                          alertaPrioridad === 'Urgente' ? 'bg-red-500/15 text-red-400' :
+                          alertaPrioridad === 'Normal' ? 'bg-amber-500/15 text-amber-400' :
+                          'bg-sky-500/15 text-sky-400'
+                        }`}>
+                          {alertaPrioridad}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-[11px] text-zinc-600 italic">Comience a escribir para ver la vista previa...</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Guide Panel */}
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5 space-y-3">
+                <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Guía de Alcances</h3>
+                <div className="space-y-2.5">
+                  {[
+                    { icon: '🌐', title: 'Global', desc: 'Llega a TODOS los usuarios del SaaS. Ideal para mantenimientos de servidor.' },
+                    { icon: '🏢', title: 'Por Empresa', desc: 'Solo el personal de una empresa específica recibirá la notificación.' },
+                    { icon: '👤', title: 'Por Rol', desc: 'Filtra por rol operativo. Ej: Alertar solo a todas las Cocinas del sistema.' },
+                  ].map((g) => (
+                    <div key={g.title} className="flex items-start gap-2.5">
+                      <span className="text-sm mt-0.5">{g.icon}</span>
+                      <div>
+                        <p className="text-[11px] font-medium text-zinc-300">{g.title}</p>
+                        <p className="text-[10px] text-zinc-600 leading-relaxed">{g.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Stats */}
+              <div className="rounded-xl border-[0.5px] border-zinc-800 bg-zinc-900/40 p-5">
+                <h3 className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-3">Estadísticas de Alcance</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-zinc-950/60 p-3 text-center">
+                    <p className="text-[18px] font-semibold text-white">{empresas.length}</p>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Empresas</p>
+                  </div>
+                  <div className="rounded-lg bg-zinc-950/60 p-3 text-center">
+                    <p className="text-[18px] font-semibold text-white">
+                      {empresas.reduce((sum, e) => sum + (e.limite_usuarios || 3), 0)}
+                    </p>
+                    <p className="text-[9px] text-zinc-500 uppercase tracking-wider">Licencias Totales</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
+
+      {/* ─── INLINE ANIMATION KEYFRAMES ─── */}
+      <style jsx>{`
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
     </div>
   );
 }

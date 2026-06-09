@@ -15,7 +15,7 @@ interface AuthContextType {
   setGiro: (giro: 'CAFETERIA' | 'RESTAURANTE' | null) => void;
   setEmpresaId: (id: number) => void;
   loading: boolean;
-  login: (email: string, password: string, selectedRol: RolUsuario, selectedGiro: 'CAFETERIA' | 'RESTAURANTE') => Promise<{ rol: RolUsuario; giro: 'CAFETERIA' | 'RESTAURANTE'; empresaId: number }>;
+  login: (email: string, password: string) => Promise<{ rol: RolUsuario; giro: 'CAFETERIA' | 'RESTAURANTE' | null; empresaId: number }>;
   logout: () => Promise<void>;
 }
 
@@ -182,7 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const login = async (email: string, password: string, selectedRol: RolUsuario, selectedGiro: 'CAFETERIA' | 'RESTAURANTE') => {
+  const login = async (email: string, password: string) => {
     const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
       email,
       password
@@ -192,29 +192,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!authData.user) throw new Error('No se pudo autenticar el usuario.');
 
     try {
-      setRolState(selectedRol);
-      setGiroState(selectedGiro);
-      setEmpresaIdState(1); // Empresa fija en 1 para la simulación de entorno del onboarding
-
-      localStorage.setItem('rol', selectedRol);
-      localStorage.setItem('giro', selectedGiro);
-      localStorage.setItem('empresaId', '1');
-
-      const { data: empData } = await supabase
-        .from('empresas')
-        .select('plan_mensual, nombre')
-        .eq('id', 1)
+      // 1. Obtener perfil de usuario desde la tabla 'usuarios'
+      const { data: userData, error: userErr } = await supabase
+        .from('usuarios')
+        .select('empresa_id, rol, nombre')
+        .eq('id', authData.user.id)
         .single();
 
-      if (empData) {
-        setEmpresaNombreState(empData.nombre);
-        setPlanState(derivePlan(empData.plan_mensual));
+      if (userErr || !userData) {
+        throw new Error('El usuario no posee un perfil configurado en la base de datos.');
+      }
+
+      const userRol = userData.rol as RolUsuario;
+      const userEmpresaId = userData.empresa_id || 1; // Fallback de seguridad si no hay empresa (ej: SuperAdmin global)
+
+      // 2. Obtener datos de la empresa si existe empresa_id
+      let empGiro: 'CAFETERIA' | 'RESTAURANTE' | null = null;
+      let empNombre = 'Plataforma SaaS';
+      let empPlan: 'basico' | 'medio' | 'premium' | null = null;
+
+      if (userData.empresa_id) {
+        const { data: empData, error: empErr } = await supabase
+          .from('empresas')
+          .select('giro, nombre, plan_mensual')
+          .eq('id', userData.empresa_id)
+          .single();
+
+        if (!empErr && empData) {
+          empGiro = empData.giro as 'CAFETERIA' | 'RESTAURANTE';
+          empNombre = empData.nombre;
+          empPlan = derivePlan(empData.plan_mensual);
+        }
+      }
+
+      // Guardar estados en el AuthContext
+      setRolState(userRol);
+      setGiroState(empGiro);
+      setEmpresaIdState(userEmpresaId);
+      setEmpresaNombreState(empNombre);
+      setPlanState(empPlan);
+
+      // Guardar en localStorage para persistencia
+      localStorage.setItem('rol', userRol);
+      if (empGiro) {
+        localStorage.setItem('giro', empGiro);
+      } else {
+        localStorage.removeItem('giro');
+      }
+      localStorage.setItem('empresaId', String(userEmpresaId));
+
+      // 3. Inicializar semillado de base de datos si aplica
+      if (userData.empresa_id) {
+        await initDatabaseSeed(userData.empresa_id);
       }
 
       return {
-        rol: selectedRol,
-        giro: selectedGiro,
-        empresaId: 1
+        rol: userRol,
+        giro: empGiro,
+        empresaId: userEmpresaId
       };
     } catch (err) {
       await supabase.auth.signOut();
