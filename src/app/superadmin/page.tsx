@@ -213,9 +213,11 @@ export default function SuperAdminPage() {
       const planVal = newPlan === 'Premium' ? 450.00 : newPlan === 'Medio' ? 280.00 : 140.00;
       const { error } = await supabase.from('empresas').update({ plan_suscripcion: newPlan, plan_mensual: planVal }).eq('id', id);
       if (error) throw error;
+      showToast('success', 'Plan actualizado con éxito.');
       await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
+      showToast('error', err.message || 'Error al actualizar el plan.');
       console.error('Error al actualizar plan:', err);
     }
   };
@@ -224,10 +226,24 @@ export default function SuperAdminPage() {
     try {
       const { error } = await supabase.from('empresas').update({ estado_cuenta: newEstado }).eq('id', id);
       if (error) throw error;
+      showToast('success', 'Estado de cuenta actualizado con éxito.');
       await fetchEmpresas();
       await loadMetrics();
     } catch (err: any) {
+      showToast('error', err.message || 'Error al actualizar el estado.');
       console.error('Error al actualizar estado:', err);
+    }
+  };
+
+  const handleUpdateLicencias = async (id: number, limite: number) => {
+    try {
+      const { error } = await supabase.from('empresas').update({ limite_usuarios: limite }).eq('id', id);
+      if (error) throw error;
+      showToast('success', 'Cupo de empleados actualizado con éxito.');
+      await fetchEmpresas();
+    } catch (err: any) {
+      showToast('error', err.message || 'Error al actualizar el cupo de empleados.');
+      console.error('Error al actualizar licencias:', err);
     }
   };
 
@@ -559,9 +575,14 @@ export default function SuperAdminPage() {
                             <td className="px-4 py-3.5 text-white font-medium">{emp.nombre}</td>
                             <td className="px-4 py-3.5 text-zinc-400 font-normal font-mono text-[11px]">{emp.nit || '—'}</td>
                             <td className="px-4 py-3.5">
-                              <span className="rounded-md border-[0.5px] border-zinc-700 bg-zinc-800/50 px-2 py-0.5 text-[10px] font-mono text-zinc-300">
-                                {emp.limite_usuarios || '—'} cupos
-                              </span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="50"
+                                value={emp.limite_usuarios || 3}
+                                onChange={(e) => handleUpdateLicencias(emp.id, parseInt(e.target.value) || 3)}
+                                className="w-16 bg-zinc-950 border-[0.5px] border-zinc-800 rounded-lg px-2 py-1 text-[11px] text-zinc-300 outline-none font-mono focus:border-emerald-500/50"
+                              />
                             </td>
                             <td className="px-4 py-3.5">
                               <select
