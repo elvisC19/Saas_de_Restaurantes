@@ -1,304 +1,232 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { PedidoConDetalles, EstadoPedido } from '@/types/database';
 
+function ElapsedTimer({ createdAt }: { createdAt: string }) {
+  const [elapsed, setElapsed] = useState('0:00');
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
+      const m = Math.floor(diff / 60);
+      const s = diff % 60;
+      setElapsed(`${m}:${s.toString().padStart(2, '0')}`);
+    };
+    update();
+    intervalRef.current = setInterval(update, 1000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [createdAt]);
+
+  const mins = parseInt(elapsed.split(':')[0]);
+  const color = mins >= 10 ? 'text-rose-400' : mins >= 5 ? 'text-amber-400' : 'text-zinc-400';
+
+  return <span className={`font-mono text-[12px] font-bold ${color}`}>{elapsed}</span>;
+}
+
 export default function CocinaPage() {
   const { rol, empresaId } = useAuth();
   const router = useRouter();
-
   const [pedidos, setPedidos] = useState<PedidoConDetalles[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Proteger ruta
-  useEffect(() => {
-    if (!rol) {
-      router.push('/');
-    }
-  }, [rol, router]);
+  useEffect(() => { if (!rol) router.push('/'); }, [rol, router]);
 
-  // Función para cargar los pedidos activos
   const loadActiveOrders = async () => {
     if (!rol) return;
     try {
-      // Consultar pedidos que no estén en estado final 'Pagado' (ya que al pagar se consideran servidos y cobrados)
       const { data, error } = await supabase
         .from('pedidos')
-        .select(`
-          *,
-          detalle_pedidos (
-            id,
-            pedido_id,
-            item_menu_id,
-            cantidad,
-            items_menu (
-              id,
-              nombre,
-              precio
-            )
-          )
-        `)
+        .select(`*, detalle_pedidos (id, pedido_id, item_menu_id, cantidad, items_menu (id, nombre, precio))`)
         .eq('empresa_id', empresaId)
         .in('estado', ['Pendiente', 'En Preparación', 'Listo'])
         .order('id', { ascending: true });
-
       if (error) throw error;
       setPedidos((data as any) || []);
-    } catch (err: any) {
-      console.error('Error al cargar pedidos en KDS:', err);
-      setErrorMsg('No se pudieron recuperar los pedidos de cocina.');
+    } catch {
+      // fail silently
     } finally {
       setLoading(false);
     }
   };
 
-  // Cargar pedidos y configurar canal en tiempo real
   useEffect(() => {
     if (!rol) return;
-
     loadActiveOrders();
-
-    // 1. Configurar canal de tiempo real para escuchar inserciones y actualizaciones
     const channel = supabase
       .channel('kds-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` },
-        () => {
-          console.log('Cambio detectado en pedidos. Recargando KDS...');
-          loadActiveOrders();
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'detalle_pedidos' },
-        () => {
-          console.log('Cambio detectado en detalle_pedidos. Recargando KDS...');
-          loadActiveOrders();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pedidos', filter: `empresa_id=eq.${empresaId}` }, () => loadActiveOrders())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'detalle_pedidos' }, () => loadActiveOrders())
       .subscribe();
-
-    // Limpiar suscripción al desmontar
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [rol, empresaId]);
 
-  // Avanzar estado del pedido
   const avanzarEstado = async (pedidoId: number, estadoActual: EstadoPedido) => {
-    let nuevoEstado: EstadoPedido;
-    if (estadoActual === 'Pendiente') {
-      nuevoEstado = 'En Preparación';
-    } else if (estadoActual === 'En Preparación') {
-      nuevoEstado = 'Listo';
-    } else {
-      return; // 'Listo' o 'Pagado' no se avanzan desde cocina
-    }
-
+    const next: EstadoPedido = estadoActual === 'Pendiente' ? 'En Preparación' : 'Listo';
+    if (estadoActual !== 'Pendiente' && estadoActual !== 'En Preparación') return;
     try {
-      const { error } = await supabase
-        .from('pedidos')
-        .update({ estado: nuevoEstado })
-        .eq('id', pedidoId);
-
-      if (error) throw error;
-      // La lista se actualizará mediante el evento Realtime
-    } catch (err: any) {
-      console.error('Error al actualizar estado:', err);
-      alert('Error al actualizar el estado en el servidor.');
+      await supabase.from('pedidos').update({ estado: next }).eq('id', pedidoId);
+    } catch {
+      alert('Error al actualizar estado.');
     }
   };
 
-  // Filtrar pedidos por columna
   const pendientes = pedidos.filter((p) => p.estado === 'Pendiente');
   const enPreparacion = pedidos.filter((p) => p.estado === 'En Preparación');
   const listos = pedidos.filter((p) => p.estado === 'Listo');
 
-  if (!rol) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6 text-zinc-400">
-        Cargando privilegios de Cocina...
-      </div>
-    );
-  }
+  if (!rol) return <div className="flex flex-1 items-center justify-center text-zinc-500">Cargando…</div>;
+
+  const columns: {
+    title: string;
+    data: PedidoConDetalles[];
+    headerColor: string;
+    dotColor: string;
+    btnLabel: string;
+    btnClass: string;
+    showBtn: boolean;
+    statusBadge?: string;
+  }[] = [
+    {
+      title: 'Nuevos Pedidos',
+      data: pendientes,
+      headerColor: 'border-amber-500/30',
+      dotColor: 'bg-amber-400',
+      btnLabel: 'Iniciar Preparación',
+      btnClass: 'bg-amber-500 hover:bg-amber-400 text-black',
+      showBtn: true,
+    },
+    {
+      title: 'En Preparación',
+      data: enPreparacion,
+      headerColor: 'border-indigo-500/30',
+      dotColor: 'bg-indigo-400',
+      btnLabel: 'Marcar como Listo',
+      btnClass: 'bg-indigo-500 hover:bg-indigo-400 text-white',
+      showBtn: true,
+    },
+    {
+      title: 'Listos para Servir',
+      data: listos,
+      headerColor: 'border-emerald-500/30',
+      dotColor: 'bg-emerald-400',
+      btnLabel: '',
+      btnClass: '',
+      showBtn: false,
+      statusBadge: 'Esperando cobro en caja',
+    },
+  ];
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-950 p-6 overflow-hidden">
-      {/* Cabecera */}
-      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-1 flex-col bg-zinc-950 overflow-hidden">
+      {/* Header */}
+      <div className="border-b border-white/[0.03] px-6 py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-zinc-100 flex items-center gap-2">
-            🍳 Pantalla de Cocina / KDS
-            <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-400 animate-pulse">
-              Tiempo Real Activo
+          <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+            Kitchen Display System
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              </span>
+              LIVE
             </span>
-          </h2>
-          <p className="text-xs text-zinc-400">Canal de preparación en vivo para baristas y cocineros</p>
+          </h1>
+          <p className="text-[11px] text-zinc-500">Las órdenes llegan automáticamente por Supabase Realtime</p>
         </div>
-        
-        {/* Leyenda académica */}
-        <div className="rounded-lg bg-zinc-900/50 border border-zinc-800 p-2.5 max-w-sm text-[11px] text-zinc-400">
-          💡 <strong>Demostración:</strong> Cuando crees un pedido en el POS, aparecerá aquí inmediatamente. Tras prepararlo, el Cajero podrá cobrarlo en el POS para activar el Trigger.
+        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+          <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> {pendientes.length} Nuevos</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-indigo-400" /> {enPreparacion.length} En prep.</span>
+          <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {listos.length} Listos</span>
         </div>
       </div>
 
-      {errorMsg && (
-        <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-          ⚠️ {errorMsg}
-        </div>
-      )}
-
+      {/* Kanban Columns */}
       {loading ? (
-        <div className="flex flex-1 items-center justify-center py-20">
-          <span className="h-8 w-8 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent" />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="h-8 w-8 rounded-full border-[3px] border-zinc-800 border-t-emerald-500 animate-spin" />
         </div>
       ) : (
-        <div className="grid flex-1 gap-6 md:grid-cols-3 overflow-hidden">
-          {/* Columna Pendiente */}
-          <div className="flex flex-col rounded-2xl bg-zinc-900/20 border border-zinc-900/80 p-4 h-[calc(100vh-180px)] overflow-hidden">
-            <div className="mb-4 flex items-center justify-between pb-2 border-b border-zinc-800">
-              <span className="text-sm font-bold text-zinc-400 uppercase tracking-wide">
-                📥 Pendientes
-              </span>
-              <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-bold text-zinc-300">
-                {pendientes.length}
-              </span>
-            </div>
-            
-            <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-              {pendientes.map((ped) => (
-                <div
-                  key={ped.id}
-                  className="rounded-xl border border-zinc-850 bg-zinc-900/50 p-4 space-y-3 hover:border-amber-500/20 transition-all animate-in fade-in slide-in-from-bottom-2 duration-300"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-extrabold text-amber-400">Pedido #{ped.id}</span>
-                    <span className="text-[10px] text-zinc-500">
-                      {new Date(ped.creado_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  
-                  {/* Items */}
-                  <div className="border-t border-b border-zinc-800/60 py-2 space-y-1">
-                    {ped.detalle_pedidos?.map((det: any) => (
-                      <div key={det.id} className="flex justify-between text-xs text-zinc-300">
-                        <span>{det.items_menu?.nombre}</span>
-                        <span className="font-bold text-zinc-100">x{det.cantidad}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={() => avanzarEstado(ped.id, 'Pendiente')}
-                    className="w-full rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-bold text-black transition-colors hover:bg-amber-400"
-                  >
-                    🔥 Iniciar Preparación
-                  </button>
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-0 overflow-hidden">
+          {columns.map((col, ci) => (
+            <div key={ci} className="flex flex-col border-r border-white/[0.02] last:border-r-0 overflow-hidden">
+              {/* Column header */}
+              <div className={`flex items-center justify-between px-5 py-3 border-b-2 ${col.headerColor} bg-white/[0.01]`}>
+                <div className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${col.dotColor}`} />
+                  <span className="text-[12px] font-bold text-zinc-300 uppercase tracking-wider">{col.title}</span>
                 </div>
-              ))}
-              {pendientes.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-8">Sin pedidos en espera</p>
-              )}
-            </div>
-          </div>
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-white/[0.04] px-1.5 text-[10px] font-bold text-zinc-400">
+                  {col.data.length}
+                </span>
+              </div>
 
-          {/* Columna En Preparación */}
-          <div className="flex flex-col rounded-2xl bg-zinc-900/20 border border-zinc-900/80 p-4 h-[calc(100vh-180px)] overflow-hidden">
-            <div className="mb-4 flex items-center justify-between pb-2 border-b border-zinc-800">
-              <span className="text-sm font-bold text-zinc-400 uppercase tracking-wide">
-                ⚡ En Preparación
-              </span>
-              <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-bold text-amber-400 border border-amber-500/10">
-                {enPreparacion.length}
-              </span>
-            </div>
-
-            <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-              {enPreparacion.map((ped) => (
-                <div
-                  key={ped.id}
-                  className="rounded-xl border border-zinc-850 bg-zinc-900/50 p-4 space-y-3 hover:border-emerald-500/20 transition-all"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-extrabold text-amber-400">Pedido #{ped.id}</span>
-                    <span className="text-[10px] text-zinc-500">
-                      {new Date(ped.creado_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+              {/* Cards */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {col.data.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="h-10 w-10 rounded-xl border border-dashed border-white/[0.06] flex items-center justify-center text-zinc-700 text-lg mb-2">
+                      {ci === 0 ? '📥' : ci === 1 ? '⚡' : '✓'}
+                    </div>
+                    <p className="text-[11px] text-zinc-600">Sin pedidos</p>
                   </div>
-
-                  {/* Items */}
-                  <div className="border-t border-b border-zinc-800/60 py-2 space-y-1">
-                    {ped.detalle_pedidos?.map((det: any) => (
-                      <div key={det.id} className="flex justify-between text-xs text-zinc-300">
-                        <span>{det.items_menu?.nombre}</span>
-                        <span className="font-bold text-zinc-100">x{det.cantidad}</span>
+                ) : (
+                  col.data.map((ped) => (
+                    <div
+                      key={ped.id}
+                      className="rounded-xl border border-white/[0.04] bg-white/[0.015] overflow-hidden transition-all hover:border-white/[0.08] animate-slide-up"
+                    >
+                      {/* Card Header */}
+                      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.03] bg-white/[0.01]">
+                        <span className="text-[13px] font-extrabold text-white">#{ped.id}</span>
+                        <div className="flex items-center gap-2">
+                          <ElapsedTimer createdAt={ped.creado_at || new Date().toISOString()} />
+                          <span className="text-[10px] text-zinc-600">
+                            {new Date(ped.creado_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
                       </div>
-                    ))}
-                  </div>
 
-                  <button
-                    onClick={() => avanzarEstado(ped.id, 'En Preparación')}
-                    className="w-full rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black transition-colors hover:bg-emerald-400"
-                  >
-                    ✓ Terminar Preparación
-                  </button>
-                </div>
-              ))}
-              {enPreparacion.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-8">Sin pedidos en proceso</p>
-              )}
-            </div>
-          </div>
-
-          {/* Columna Listo */}
-          <div className="flex flex-col rounded-2xl bg-zinc-900/20 border border-zinc-900/80 p-4 h-[calc(100vh-180px)] overflow-hidden">
-            <div className="mb-4 flex items-center justify-between pb-2 border-b border-zinc-800">
-              <span className="text-sm font-bold text-zinc-400 uppercase tracking-wide">
-                📦 Listos para Servir
-              </span>
-              <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-bold text-emerald-400 border border-emerald-500/10">
-                {listos.length}
-              </span>
-            </div>
-
-            <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-              {listos.map((ped) => (
-                <div
-                  key={ped.id}
-                  className="rounded-xl border border-zinc-850 bg-zinc-900/50 p-4 space-y-3 border-emerald-500/10"
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-extrabold text-emerald-400">Pedido #{ped.id}</span>
-                    <span className="text-[10px] text-zinc-500">
-                      {new Date(ped.creado_at || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-
-                  {/* Items */}
-                  <div className="border-t border-b border-zinc-800/60 py-2 space-y-1">
-                    {ped.detalle_pedidos?.map((det: any) => (
-                      <div key={det.id} className="flex justify-between text-xs text-zinc-300">
-                        <span>{det.items_menu?.nombre}</span>
-                        <span className="font-bold text-zinc-100">x{det.cantidad}</span>
+                      {/* Card Body — Items */}
+                      <div className="px-4 py-3 space-y-1.5">
+                        {ped.detalle_pedidos?.map((det: any) => (
+                          <div key={det.id} className="flex items-center justify-between">
+                            <span className="text-[12px] text-zinc-300">{det.items_menu?.nombre}</span>
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-white/[0.04] px-1.5 text-[10px] font-bold text-white">
+                              ×{det.cantidad}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
 
-                  <div className="rounded bg-emerald-500/10 border border-emerald-500/20 p-2 text-center text-xs font-semibold text-emerald-400">
-                    🔔 Esperando Cobro / Entrega en Caja
-                  </div>
-                </div>
-              ))}
-              {listos.length === 0 && (
-                <p className="text-xs text-zinc-600 text-center py-8">Sin pedidos listos</p>
-              )}
+                      {/* Card Footer — Action */}
+                      <div className="px-4 py-2.5 border-t border-white/[0.03]">
+                        {col.showBtn ? (
+                          <button
+                            onClick={() => avanzarEstado(ped.id, ped.estado)}
+                            className={`w-full rounded-lg px-3 py-2 text-[11px] font-bold transition-all active:scale-[0.97] ${col.btnClass}`}
+                          >
+                            {col.btnLabel}
+                          </button>
+                        ) : (
+                          <div className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-3 py-2 text-[11px] font-semibold text-emerald-400">
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {col.statusBadge}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          ))}
         </div>
       )}
     </div>

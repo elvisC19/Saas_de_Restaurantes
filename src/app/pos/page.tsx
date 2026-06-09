@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -17,43 +17,35 @@ export default function PosPage() {
   const { rol, empresaId } = useAuth();
   const router = useRouter();
 
-  // Estados del POS
   const [productos, setProductos] = useState<ItemMenu[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [addedId, setAddedId] = useState<number | null>(null);
 
-  // Estados del Modal de Pago
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [createdPedidoId, setCreatedPedidoId] = useState<number | null>(null);
   const [pedidoTotal, setPedidoTotal] = useState('0.00');
 
-  // Proteger la ruta (redirecciona si no hay rol)
   useEffect(() => {
-    if (!rol) {
-      router.push('/');
-    }
+    if (!rol) router.push('/');
   }, [rol, router]);
 
-  // Cargar productos del menú desde Supabase
   useEffect(() => {
     async function loadMenu() {
       if (!rol) return;
       setLoadingItems(true);
-      setErrorMsg(null);
       try {
         const { data, error } = await supabase
           .from('items_menu')
           .select('*')
           .eq('empresa_id', empresaId)
           .order('nombre', { ascending: true });
-
         if (error) throw error;
         setProductos(data || []);
       } catch (err: any) {
-        console.error('Error al cargar menú:', err);
-        setErrorMsg('No se pudo conectar con la base de datos para cargar el menú.');
+        setErrorMsg('Error de conexión al cargar el menú.');
       } finally {
         setLoadingItems(false);
       }
@@ -61,223 +53,204 @@ export default function PosPage() {
     loadMenu();
   }, [rol, empresaId]);
 
-  // Agregar item al carrito
-  const addToCart = (item: ItemMenu) => {
+  const addToCart = useCallback((item: ItemMenu) => {
+    setAddedId(item.id);
+    setTimeout(() => setAddedId(null), 300);
     setCart((prev) => {
       const existing = prev.find((i) => i.item.id === item.id);
       if (existing) {
-        return prev.map((i) =>
-          i.item.id === item.id ? { ...i, cantidad: i.cantidad + 1 } : i
-        );
+        return prev.map((i) => i.item.id === item.id ? { ...i, cantidad: i.cantidad + 1 } : i);
       }
       return [...prev, { item, cantidad: 1 }];
     });
-  };
+  }, []);
 
-  // Restar item del carrito
   const subtractFromCart = (itemId: number) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.item.id === itemId);
       if (!existing) return prev;
-      if (existing.cantidad === 1) {
-        return prev.filter((i) => i.item.id !== itemId);
-      }
-      return prev.map((i) =>
-        i.item.id === itemId ? { ...i, cantidad: i.cantidad - 1 } : i
-      );
+      if (existing.cantidad === 1) return prev.filter((i) => i.item.id !== itemId);
+      return prev.map((i) => i.item.id === itemId ? { ...i, cantidad: i.cantidad - 1 } : i);
     });
   };
 
-  // Quitar por completo del carrito
-  const removeFromCart = (itemId: number) => {
-    setCart((prev) => prev.filter((i) => i.item.id !== itemId));
-  };
-
-  // Limpiar todo el carrito
   const clearCart = () => setCart([]);
 
-  // Calcular el total del carrito con precisión fija
   const calcularTotal = (): string => {
     let total = '0.00';
-    cart.forEach((cartItem) => {
-      const itemTotal = multiplyDecimals(cartItem.item.precio, cartItem.cantidad, 2);
-      total = addDecimals(total, itemTotal, 2);
+    cart.forEach((ci) => {
+      total = addDecimals(total, multiplyDecimals(ci.item.precio, ci.cantidad, 2), 2);
     });
     return total;
   };
 
-  // Registrar pedido en la base de datos
   const handleGenerateOrder = async () => {
     if (cart.length === 0) return;
     setSubmittingOrder(true);
     setErrorMsg(null);
-
     const totalStr = calcularTotal();
-
     try {
-      // 1. Insertar el Pedido (Cabecera) en estado 'Pendiente'
       const { data: pedidoData, error: pedidoError } = await supabase
         .from('pedidos')
-        .insert([
-          {
-            empresa_id: empresaId,
-            total: totalStr,
-            estado: 'Pendiente',
-          },
-        ])
+        .insert([{ empresa_id: empresaId, total: totalStr, estado: 'Pendiente' }])
         .select()
         .single();
-
       if (pedidoError) throw pedidoError;
 
       const orderId = pedidoData.id;
-
-      // 2. Insertar los detalles correspondientes
-      const detallesInsertables = cart.map((cartItem) => ({
+      const detalles = cart.map((ci) => ({
         pedido_id: orderId,
-        item_menu_id: cartItem.item.id,
-        cantidad: cartItem.cantidad,
+        item_menu_id: ci.item.id,
+        cantidad: ci.cantidad,
       }));
+      const { error: detError } = await supabase.from('detalle_pedidos').insert(detalles);
+      if (detError) throw detError;
 
-      const { error: detallesError } = await supabase
-        .from('detalle_pedidos')
-        .insert(detallesInsertables);
-
-      if (detallesError) {
-        // En un caso real, deberíamos borrar el pedido huérfano, pero para la demo manejamos la excepción
-        throw detallesError;
-      }
-
-      // 3. Abrir modal de pago con los datos generados
       setCreatedPedidoId(orderId);
       setPedidoTotal(totalStr);
       setIsModalOpen(true);
     } catch (err: any) {
-      console.error('Error al registrar pedido:', err);
-      setErrorMsg(err.message || 'Error de conexión al crear el pedido.');
+      setErrorMsg(err.message || 'Error al crear el pedido.');
     } finally {
       setSubmittingOrder(false);
     }
   };
 
-  if (!rol) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6 text-zinc-400">
-        Cargando privilegios...
-      </div>
-    );
-  }
+  if (!rol) return <div className="flex flex-1 items-center justify-center text-zinc-500">Cargando…</div>;
 
   const currentTotal = calcularTotal();
+  const totalItems = cart.reduce((s, ci) => s + ci.cantidad, 0);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-zinc-950 lg:flex-row">
-      {/* Sección Izquierda: Catálogo del Menú */}
-      <div className="flex flex-1 flex-col border-b border-zinc-800 p-6 lg:border-b-0 lg:border-r overflow-y-auto">
+      {/* ───── LEFT: Catalog ───── */}
+      <div className="flex flex-1 flex-col p-6 overflow-y-auto border-b border-white/[0.03] lg:border-b-0 lg:border-r">
+        {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-bold text-zinc-100">Menú Comercial</h2>
-            <p className="text-xs text-zinc-400">Haz clic en un producto para agregarlo al pedido</p>
+            <h1 className="text-xl font-bold text-white tracking-tight">Menú del día</h1>
+            <p className="text-[12px] text-zinc-500">Toca un producto para agregarlo al pedido</p>
           </div>
-          <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-semibold text-amber-400 border border-zinc-700">
-            {productos.length} Productos
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="rounded-lg border border-white/[0.04] bg-white/[0.02] px-3 py-1.5 text-[11px] font-semibold text-zinc-400">
+              {productos.length} ítems
+            </span>
+          </div>
         </div>
 
         {errorMsg && (
-          <div className="mb-6 rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-            ⚠️ {errorMsg}
-          </div>
+          <div className="mb-4 rounded-xl border border-rose-500/10 bg-rose-500/5 p-3 text-sm text-rose-400">{errorMsg}</div>
         )}
 
         {loadingItems ? (
-          <div className="flex flex-1 items-center justify-center py-20">
-            <span className="h-8 w-8 animate-spin rounded-full border-4 border-amber-500 border-t-transparent" />
+          <div className="flex flex-1 items-center justify-center">
+            <div className="h-8 w-8 rounded-full border-[3px] border-zinc-800 border-t-indigo-500 animate-spin" />
           </div>
         ) : productos.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/10">
-            <span className="text-4xl mb-3">☕</span>
-            <p className="text-sm text-zinc-400">No hay productos registrados en el menú.</p>
-            <p className="text-xs text-zinc-600 mt-1">Asegúrate de correr el script SQL semilla en Supabase.</p>
+          <div className="flex flex-col items-center justify-center flex-1 py-20 rounded-2xl border border-dashed border-white/[0.04]">
+            <div className="text-4xl mb-3 opacity-30">☕</div>
+            <p className="text-sm text-zinc-500">Menú vacío</p>
+            <p className="text-[11px] text-zinc-600 mt-1">Ejecuta el script SQL semilla en Supabase</p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {productos.map((prod) => (
-              <button
-                key={prod.id}
-                onClick={() => addToCart(prod)}
-                className="group relative flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/30 p-5 text-left transition-all hover:border-amber-500/40 hover:bg-zinc-900/60"
-              >
-                <div className="mb-4">
-                  <span className="text-2xl mb-2 block">☕</span>
-                  <h3 className="font-bold text-zinc-100 group-hover:text-amber-400 transition-colors">
-                    {prod.nombre}
-                  </h3>
-                </div>
-                <div className="flex items-center justify-between mt-2 w-full">
-                  <span className="text-sm font-semibold text-zinc-400">Precio</span>
-                  <span className="text-base font-extrabold text-zinc-100">
-                    {formatCurrency(prod.precio)}
-                  </span>
-                </div>
-              </button>
-            ))}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {productos.map((prod) => {
+              const isJustAdded = addedId === prod.id;
+              const inCart = cart.find((ci) => ci.item.id === prod.id);
+              return (
+                <button
+                  key={prod.id}
+                  onClick={() => addToCart(prod)}
+                  className={`group relative flex flex-col justify-between rounded-2xl border p-5 text-left transition-all duration-200 ${
+                    isJustAdded
+                      ? 'border-emerald-500/30 bg-emerald-500/5 scale-[0.97]'
+                      : 'border-white/[0.04] bg-white/[0.015] hover:border-white/[0.08] hover:bg-white/[0.03]'
+                  }`}
+                >
+                  {/* Cart badge */}
+                  {inCart && (
+                    <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500 text-[11px] font-black text-white shadow-lg shadow-indigo-500/30 animate-count-up">
+                      {inCart.cantidad}
+                    </span>
+                  )}
+
+                  <div>
+                    <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/5 text-xl">
+                      ☕
+                    </div>
+                    <h3 className="text-[15px] font-bold text-white group-hover:text-amber-300 transition-colors leading-tight">
+                      {prod.nombre}
+                    </h3>
+                  </div>
+
+                  <div className="mt-4 flex items-end justify-between">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-zinc-600 font-semibold">Precio</p>
+                      <p className="text-lg font-extrabold text-white tracking-tight">{formatCurrency(prod.precio)}</p>
+                    </div>
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-zinc-500 group-hover:bg-indigo-500 group-hover:text-white transition-all">
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Sección Derecha: Carrito / Resumen del Pedido */}
-      <div className="w-full lg:w-96 bg-zinc-950 flex flex-col justify-between p-6 border-t border-zinc-800 lg:border-t-0">
-        <div className="flex flex-col flex-1 overflow-y-auto">
-          <div className="flex items-center justify-between pb-4 border-b border-zinc-800 mb-4">
-            <h2 className="text-lg font-bold text-zinc-200">Detalle de Venta</h2>
-            {cart.length > 0 && (
-              <button
-                onClick={clearCart}
-                className="text-xs font-semibold text-rose-400 hover:text-rose-300"
-              >
-                Limpiar todo
-              </button>
+      {/* ───── RIGHT: Cart ───── */}
+      <div className="w-full lg:w-[380px] flex flex-col bg-zinc-950 border-t border-white/[0.03] lg:border-t-0">
+        {/* Cart Header */}
+        <div className="flex items-center justify-between border-b border-white/[0.04] px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-[15px] font-bold text-white">Detalle de Venta</h2>
+            {totalItems > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-500/20 px-1.5 text-[10px] font-bold text-indigo-400">
+                {totalItems}
+              </span>
             )}
           </div>
+          {cart.length > 0 && (
+            <button onClick={clearCart} className="text-[11px] font-semibold text-rose-400/70 hover:text-rose-400 transition-colors">
+              Vaciar
+            </button>
+          )}
+        </div>
 
+        {/* Cart Items */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
           {cart.length === 0 ? (
-            <div className="flex flex-col items-center justify-center flex-1 py-16 text-zinc-500 text-center">
-              <span className="text-3xl mb-2">🛒</span>
-              <p className="text-xs">El carrito está vacío.</p>
-              <p className="text-[10px] text-zinc-600 mt-1">Selecciona items del catálogo de la izquierda.</p>
+            <div className="flex flex-col items-center justify-center h-full text-center py-16">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-white/[0.06] text-2xl text-zinc-700">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 00-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 00-16.536-1.84M7.5 14.25L5.106 5.272M6 20.25a.75.75 0 11-1.5 0 .75.75 0 011.5 0zm12.75 0a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" />
+                </svg>
+              </div>
+              <p className="mt-3 text-xs text-zinc-600">El carrito está vacío</p>
             </div>
           ) : (
-            <div className="space-y-3 flex-1">
-              {cart.map((cartItem) => {
-                const subtotal = multiplyDecimals(cartItem.item.precio, cartItem.cantidad, 2);
+            <div className="space-y-2.5">
+              {cart.map((ci) => {
+                const sub = multiplyDecimals(ci.item.precio, ci.cantidad, 2);
                 return (
-                  <div
-                    key={cartItem.item.id}
-                    className="flex justify-between items-start rounded-xl border border-zinc-800 bg-zinc-900/20 p-3 text-sm"
-                  >
-                    <div className="flex-1 pr-3">
-                      <p className="font-semibold text-zinc-200">{cartItem.item.nombre}</p>
-                      <p className="text-xs text-zinc-500 mt-0.5">{formatCurrency(cartItem.item.precio)} c/u</p>
+                  <div key={ci.item.id} className="flex items-center gap-3 rounded-xl border border-white/[0.03] bg-white/[0.015] p-3 animate-slide-up">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold text-white truncate">{ci.item.nombre}</p>
+                      <p className="text-[11px] text-zinc-500">{formatCurrency(ci.item.precio)} c/u</p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <span className="font-bold text-zinc-100">{formatCurrency(subtotal)}</span>
-                      <div className="flex items-center gap-2 rounded-lg border border-zinc-850 bg-zinc-900 px-2 py-1">
-                        <button
-                          onClick={() => subtractFromCart(cartItem.item.id)}
-                          className="text-xs text-zinc-400 hover:text-zinc-200 w-4 text-center font-bold"
-                        >
-                          -
-                        </button>
-                        <span className="text-xs font-bold text-zinc-300 px-1">{cartItem.cantidad}</span>
-                        <button
-                          onClick={() => addToCart(cartItem.item)}
-                          className="text-xs text-zinc-400 hover:text-zinc-200 w-4 text-center font-bold"
-                        >
-                          +
-                        </button>
-                      </div>
+                    <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.04] bg-white/[0.02] px-1 py-0.5">
+                      <button onClick={() => subtractFromCart(ci.item.id)} className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-white transition-all text-sm font-bold">
+                        −
+                      </button>
+                      <span className="w-5 text-center text-[12px] font-bold text-white">{ci.cantidad}</span>
+                      <button onClick={() => addToCart(ci.item)} className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-white/[0.06] hover:text-white transition-all text-sm font-bold">
+                        +
+                      </button>
                     </div>
+                    <span className="text-[13px] font-bold text-white w-20 text-right">{formatCurrency(sub)}</span>
                   </div>
                 );
               })}
@@ -285,35 +258,35 @@ export default function PosPage() {
           )}
         </div>
 
-        {/* Totales y Botones de Compra */}
-        <div className="pt-4 border-t border-zinc-850 bg-zinc-950 mt-4">
-          <div className="flex justify-between items-center mb-6">
-            <span className="text-zinc-400 text-sm font-semibold">Total General</span>
-            <span className="text-2xl font-extrabold text-zinc-100">
-              {formatCurrency(currentTotal)}
-            </span>
+        {/* Cart Footer */}
+        <div className="border-t border-white/[0.04] bg-zinc-950 px-6 py-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-zinc-400 font-medium">Total</span>
+            <span className="text-2xl font-extrabold text-white tracking-tight">{formatCurrency(currentTotal)}</span>
           </div>
-
           <button
             onClick={handleGenerateOrder}
             disabled={cart.length === 0 || submittingOrder}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 px-4 py-3.5 font-bold text-white transition-all hover:brightness-110 shadow-lg shadow-amber-950/20 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-3.5 font-bold text-white shadow-xl shadow-indigo-500/20 transition-all hover:shadow-indigo-500/30 hover:brightness-110 active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed"
           >
             {submittingOrder ? (
-              <>
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Registrando Pedido...
-              </>
+              <span className="flex items-center justify-center gap-2">
+                <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                Procesando…
+              </span>
             ) : (
-              <>
-                📝 Generar Pedido
-              </>
+              <span className="flex items-center justify-center gap-2">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Generar Pedido
+              </span>
             )}
           </button>
         </div>
       </div>
 
-      {/* Modal de Pago Financiero */}
+      {/* ───── Payment Modal ───── */}
       <PaymentModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

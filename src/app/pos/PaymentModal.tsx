@@ -12,48 +12,33 @@ interface PaymentModalProps {
   onPaymentSuccess: () => void;
 }
 
-export default function PaymentModal({
-  isOpen,
-  onClose,
-  pedidoId,
-  total,
-  onPaymentSuccess,
-}: PaymentModalProps) {
+export default function PaymentModal({ isOpen, onClose, pedidoId, total, onPaymentSuccess }: PaymentModalProps) {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen || !pedidoId) return null;
 
-  // Formatear el JSON estándar de la ASFI para QR "Simple" de Bolivia
-  const qrSimpleData = {
-    globallyUniqueIdentifier: "bo.gob.asfi.qr.simple",
-    merchantName: "Café Central Sucre",
-    merchantCity: "Sucre",
+  const qrPayload = {
+    globallyUniqueIdentifier: 'bo.gob.asfi.qr.simple',
+    merchantName: 'Café Central Sucre',
+    merchantCity: 'Sucre',
     transactionAmount: total,
-    transactionCurrency: "BOB",
+    transactionCurrency: 'BOB',
     orderId: pedidoId,
-    expirationDate: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 minutos de expiración
-    singleUse: true
+    expirationDate: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+    singleUse: true,
   };
 
-  const handleSimulatePayment = async () => {
+  const handlePay = async () => {
     setLoading(true);
     setError(null);
     try {
-      // 1. Simular la llamada del Webhook actualizando el estado a 'Pagado' en Supabase.
-      // Esto disparará automáticamente el Trigger 'trg_descontar_inventario' en PostgreSQL
-      const { error: updateError } = await supabase
-        .from('pedidos')
-        .update({ estado: 'Pagado' })
-        .eq('id', pedidoId);
-
-      if (updateError) throw updateError;
-
+      const { error: err } = await supabase.from('pedidos').update({ estado: 'Pagado' }).eq('id', pedidoId);
+      if (err) throw err;
       setSuccess(true);
-    } catch (err: any) {
-      console.error('Error al simular pago:', err);
-      setError(err.message || 'Error al conectar con la base de datos.');
+    } catch (e: any) {
+      setError(e.message || 'Error de conexión.');
     } finally {
       setLoading(false);
     }
@@ -62,157 +47,144 @@ export default function PaymentModal({
   const handleFinalize = () => {
     onPaymentSuccess();
     onClose();
-    // Restablecer el estado interno del modal
     setSuccess(false);
     setError(null);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-        
-        {/* Cabecera */}
-        <div className="flex items-center justify-between border-b border-zinc-800 p-5">
-          <h3 className="text-lg font-bold text-zinc-100">
-            💵 Simulación de Pago - Código QR "Simple"
-          </h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/[0.06] bg-zinc-900 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/[0.04] px-6 py-4">
+          <div>
+            <h3 className="text-[15px] font-bold text-white">Cobro Digital — QR Simple</h3>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Interoperabilidad ASFI - Bolivia</p>
+          </div>
           {!success && (
-            <button
-              onClick={onClose}
-              className="text-zinc-400 hover:text-zinc-200"
-              disabled={loading}
-            >
-              ✕
+            <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.03] text-zinc-500 hover:text-white hover:bg-white/[0.06] transition-all" disabled={loading}>
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           )}
         </div>
 
-        {/* Contenido Principal */}
         <div className="p-6">
           {!success ? (
-            <div className="space-y-6">
-              {/* Resumen del pedido */}
-              <div className="rounded-xl bg-zinc-950 p-4 border border-zinc-800 flex justify-between items-center">
+            <div className="space-y-5">
+              {/* Order summary */}
+              <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-white/[0.02] p-4">
                 <div>
-                  <p className="text-xs text-zinc-500 uppercase font-semibold">Orden #</p>
-                  <p className="text-xl font-bold text-amber-400">{pedidoId}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Pedido</p>
+                  <p className="text-xl font-extrabold text-indigo-400">#{pedidoId}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-zinc-500 uppercase font-semibold">Total a Pagar</p>
-                  <p className="text-2xl font-extrabold text-zinc-100">{formatCurrency(total)}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Total</p>
+                  <p className="text-2xl font-extrabold text-white tracking-tight">{formatCurrency(total)}</p>
                 </div>
               </div>
 
-              {/* QR Simulado & JSON */}
-              <div className="grid gap-6 sm:grid-cols-2">
-                {/* Lado QR Visual */}
-                <div className="flex flex-col items-center justify-center rounded-xl bg-white p-4">
-                  <div className="relative flex h-40 w-40 items-center justify-center border-4 border-amber-500 rounded-lg p-1">
-                    {/* Generamos un SVG que simula ser un QR estilizado comercialmente */}
+              {/* QR + JSON side by side */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* QR Visual */}
+                <div className="flex flex-col items-center justify-center rounded-xl bg-white p-5">
+                  <div className="relative flex h-32 w-32 items-center justify-center rounded-lg border-2 border-indigo-500 p-1">
                     <svg className="h-full w-full text-zinc-900" viewBox="0 0 100 100">
-                      <rect width="100" height="100" fill="none" />
-                      {/* Esquinas de posicionamiento (QR anchors) */}
-                      <rect x="0" y="0" width="30" height="30" fill="currentColor" />
-                      <rect x="5" y="5" width="20" height="20" fill="white" />
-                      <rect x="10" y="10" width="10" height="10" fill="currentColor" />
-
-                      <rect x="70" y="0" width="30" height="30" fill="currentColor" />
-                      <rect x="75" y="5" width="20" height="20" fill="white" />
-                      <rect x="80" y="10" width="10" height="10" fill="currentColor" />
-
-                      <rect x="0" y="70" width="30" height="30" fill="currentColor" />
-                      <rect x="5" y="75" width="20" height="20" fill="white" />
-                      <rect x="10" y="80" width="10" height="10" fill="currentColor" />
-                      
-                      {/* Patrones de bits falsificados */}
-                      <rect x="40" y="10" width="20" height="10" fill="currentColor" />
-                      <rect x="40" y="25" width="10" height="15" fill="currentColor" />
-                      <rect x="15" y="40" width="15" height="10" fill="currentColor" />
-                      <rect x="35" y="45" width="25" height="10" fill="currentColor" />
-                      <rect x="70" y="40" width="20" height="15" fill="currentColor" />
-                      <rect x="10" y="55" width="20" height="10" fill="currentColor" />
-                      <rect x="40" y="60" width="15" height="25" fill="currentColor" />
-                      <rect x="70" y="65" width="25" height="15" fill="currentColor" />
-                      <rect x="60" y="85" width="30" height="10" fill="currentColor" />
-                      
-                      {/* Mini logo de café en el centro */}
+                      <rect x="0" y="0" width="28" height="28" fill="currentColor" />
+                      <rect x="4" y="4" width="20" height="20" fill="white" />
+                      <rect x="8" y="8" width="12" height="12" fill="currentColor" />
+                      <rect x="72" y="0" width="28" height="28" fill="currentColor" />
+                      <rect x="76" y="4" width="20" height="20" fill="white" />
+                      <rect x="80" y="8" width="12" height="12" fill="currentColor" />
+                      <rect x="0" y="72" width="28" height="28" fill="currentColor" />
+                      <rect x="4" y="76" width="20" height="20" fill="white" />
+                      <rect x="8" y="80" width="12" height="12" fill="currentColor" />
+                      <rect x="36" y="8" width="8" height="12" fill="currentColor" />
+                      <rect x="50" y="8" width="14" height="8" fill="currentColor" />
+                      <rect x="36" y="26" width="14" height="8" fill="currentColor" />
+                      <rect x="56" y="26" width="8" height="14" fill="currentColor" />
+                      <rect x="12" y="36" width="16" height="8" fill="currentColor" />
+                      <rect x="36" y="40" width="28" height="8" fill="currentColor" />
+                      <rect x="72" y="36" width="18" height="10" fill="currentColor" />
+                      <rect x="8" y="52" width="20" height="8" fill="currentColor" />
+                      <rect x="36" y="56" width="12" height="28" fill="currentColor" />
+                      <rect x="72" y="60" width="20" height="12" fill="currentColor" />
+                      <rect x="56" y="80" width="34" height="8" fill="currentColor" />
                       <rect x="42" y="42" width="16" height="16" fill="white" />
-                      <text x="50" y="53" fontSize="12" textAnchor="middle" fill="currentColor">☕</text>
+                      <text x="50" y="54" fontSize="12" textAnchor="middle" fill="#4f46e5">G</text>
                     </svg>
-                    
-                    {/* Escribir un tag de Bolivia */}
-                    <div className="absolute -bottom-2.5 rounded bg-emerald-600 px-1.5 py-0.5 text-[8px] font-bold text-white shadow">
-                      QR Simple - ASFI
+                    <div className="absolute -bottom-2 rounded-full bg-indigo-600 px-2 py-0.5 text-[8px] font-bold text-white shadow-lg">
+                      QR Simple
                     </div>
                   </div>
-                  <p className="mt-3 text-[10px] text-zinc-500 text-center uppercase tracking-wide">
-                    Escanea para pagar desde cualquier app bancaria de Bolivia (Simulado)
+                  <p className="mt-3 text-[9px] text-zinc-500 text-center uppercase tracking-wide leading-relaxed">
+                    Escanea con cualquier app bancaria (Simulado)
                   </p>
                 </div>
 
-                {/* Lado JSON Estándar ASFI */}
-                <div className="flex flex-col justify-between">
-                  <div>
-                    <label className="text-xs font-semibold text-zinc-400 block mb-1">
-                      Metadata de Interoperabilidad (ASFI JSON):
-                    </label>
-                    <pre className="text-[10px] font-mono bg-zinc-950 p-3 rounded-lg border border-zinc-800 text-zinc-400 overflow-x-auto max-h-44">
-                      {JSON.stringify(qrSimpleData, null, 2)}
-                    </pre>
-                  </div>
+                {/* JSON payload */}
+                <div className="flex flex-col">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-1.5">Payload ASFI</label>
+                  <pre className="flex-1 rounded-xl border border-white/[0.04] bg-zinc-950 p-3 text-[9px] font-mono text-zinc-500 overflow-x-auto leading-relaxed">
+                    {JSON.stringify(qrPayload, null, 2)}
+                  </pre>
                 </div>
               </div>
 
               {error && (
-                <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-400">
-                  ⚠️ {error}
-                </div>
+                <div className="rounded-xl border border-rose-500/10 bg-rose-500/5 p-3 text-[12px] text-rose-400">{error}</div>
               )}
 
-              {/* Botón Simular Webhook */}
+              {/* CTA */}
               <button
-                onClick={handleSimulatePayment}
+                onClick={handlePay}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 px-4 py-3 font-semibold text-white transition-all hover:brightness-110 shadow-lg shadow-amber-950/20 disabled:opacity-50"
+                className="relative w-full overflow-hidden rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-4 py-3.5 font-bold text-white shadow-xl shadow-indigo-500/20 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-40"
               >
                 {loading ? (
-                  <>
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Procesando Webhook de Pago...
-                  </>
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Procesando Webhook…
+                  </span>
                 ) : (
-                  <>
-                    ⚡ Simular Notificación de Pago (Webhook)
-                  </>
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                    </svg>
+                    Simular Notificación de Pago (Webhook)
+                  </span>
                 )}
               </button>
             </div>
           ) : (
-            /* Pantalla de éxito */
+            /* Success State */
             <div className="flex flex-col items-center justify-center py-6 text-center space-y-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 border border-emerald-500/30 text-3xl text-emerald-400 animate-bounce">
-                ✓
+              <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-pulse-ring" />
+                <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10">
+                  <svg className="h-8 w-8 text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </div>
               </div>
-              <h4 className="text-xl font-bold text-zinc-100">
-                ¡Pago Confirmado Exitosamente!
-              </h4>
-              <p className="text-sm text-zinc-400 max-w-sm">
-                La notificación de pago (Webhook simulado) fue enviada. El estado del pedido se actualizó a <strong className="text-emerald-400">'Pagado'</strong>.
-              </p>
-              
-              {/* Alerta explicativa de base de datos para la defensa */}
-              <div className="w-full rounded-xl bg-emerald-500/5 border border-emerald-500/15 p-4 text-left">
-                <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wide block mb-1">
-                  ⚡ Consistencia Académica en Supabase:
-                </span>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  PostgreSQL detectó el estado <strong>'Pagado'</strong> y disparó el Trigger <code>trg_descontar_inventario</code>. El stock físico de materias primas ha sido recalculado y disminuido en base a las recetas enlazadas de manera exacta.
+
+              <div>
+                <h4 className="text-lg font-bold text-white">Pago Confirmado</h4>
+                <p className="text-[12px] text-zinc-500 mt-1 max-w-xs mx-auto">
+                  El estado del pedido cambió a <strong className="text-emerald-400">Pagado</strong>. El trigger de PostgreSQL recalculó el inventario.
+                </p>
+              </div>
+
+              <div className="w-full rounded-xl border border-emerald-500/10 bg-emerald-500/[0.03] p-4 text-left">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-1">Base de Datos</p>
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  <code className="rounded bg-white/[0.04] px-1 py-0.5 text-emerald-400 text-[10px] font-mono">trg_descontar_inventario</code> se ejecutó exitosamente. El stock físico fue decrementado con precisión NUMERIC(12,4).
                 </p>
               </div>
 
               <button
                 onClick={handleFinalize}
-                className="w-full rounded-xl bg-zinc-800 px-4 py-2.5 font-semibold text-zinc-100 hover:bg-zinc-700 transition-colors"
+                className="w-full rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 font-semibold text-white transition-all hover:bg-white/[0.06]"
               >
                 Cerrar y Limpiar Carrito
               </button>

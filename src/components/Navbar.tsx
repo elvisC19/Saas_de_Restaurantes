@@ -4,6 +4,12 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 
+const navLinks = [
+  { href: '/pos', label: 'Punto de Venta', icon: '◉', roles: ['Administrador', 'Cajero'] },
+  { href: '/cocina', label: 'Cocina KDS', icon: '◎', roles: ['Administrador', 'Cocina'] },
+  { href: '/admin', label: 'Dashboard', icon: '◈', roles: ['Administrador'] },
+];
+
 export default function Navbar() {
   const { rol, setRol, empresaNombre } = useAuth();
   const pathname = usePathname();
@@ -16,90 +22,66 @@ export default function Navbar() {
     router.push('/');
   };
 
-  // Determinar color de badge según rol
-  const getBadgeClass = () => {
-    switch (rol) {
-      case 'Administrador':
-        return 'bg-rose-500/10 text-rose-400 border border-rose-500/25';
-      case 'Cajero':
-        return 'bg-amber-500/10 text-amber-400 border border-amber-500/25';
-      case 'Cocina':
-        return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/25';
-      default:
-        return 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/25';
-    }
+  const rolColor: Record<string, string> = {
+    Administrador: 'from-indigo-500 to-violet-600',
+    Cajero: 'from-amber-500 to-orange-600',
+    Cocina: 'from-emerald-500 to-teal-600',
   };
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md px-6 py-3">
-      <div className="mx-auto flex max-w-7xl items-center justify-between">
-        {/* Logo / Nombre */}
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-amber-600 to-rose-600 text-white font-bold shadow-md shadow-amber-900/20">
-            ☕
+    <nav className="sticky top-0 z-50 glass border-b border-white/[0.04]">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-5">
+        {/* Logo */}
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br ${rolColor[rol] || 'from-zinc-600 to-zinc-700'} text-sm font-black text-white shadow-lg transition-transform group-hover:scale-105`}>
+            G
           </div>
-          <div>
-            <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-lg font-bold tracking-tight text-transparent">
-              {empresaNombre}
-            </span>
-            <span className="ml-2 hidden text-xs font-medium text-zinc-500 sm:inline">
-              SaaS Multi-tenant
-            </span>
+          <div className="hidden sm:flex flex-col leading-none">
+            <span className="text-[13px] font-bold text-white tracking-tight">{empresaNombre}</span>
+            <span className="text-[10px] font-medium text-zinc-500 tracking-wide">SAAS GASTRONÓMICO</span>
           </div>
+        </Link>
+
+        {/* Navigation Links */}
+        <div className="flex items-center gap-0.5 rounded-xl border border-white/[0.04] bg-white/[0.02] p-1">
+          {navLinks
+            .filter((link) => link.roles.includes(rol))
+            .map((link) => {
+              const isActive = pathname === link.href;
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`relative flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold tracking-wide transition-all duration-200 ${
+                    isActive
+                      ? 'bg-white/[0.08] text-white shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'
+                  }`}
+                >
+                  <span className={`text-[11px] ${isActive ? 'text-emerald-400' : ''}`}>{link.icon}</span>
+                  <span className="hidden md:inline">{link.label}</span>
+                  {isActive && (
+                    <span className="absolute -bottom-[5px] left-1/2 h-[2px] w-4 -translate-x-1/2 rounded-full bg-emerald-400" />
+                  )}
+                </Link>
+              );
+            })}
         </div>
 
-        {/* Links de Navegación según Rol */}
-        <div className="flex items-center gap-1 sm:gap-2">
-          {(rol === 'Administrador' || rol === 'Cajero') && (
-            <Link
-              href="/pos"
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                pathname === '/pos'
-                  ? 'bg-zinc-800 text-amber-400'
-                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              🛒 Punto de Venta
-            </Link>
-          )}
-
-          {(rol === 'Administrador' || rol === 'Cocina') && (
-            <Link
-              href="/cocina"
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                pathname === '/cocina'
-                  ? 'bg-zinc-800 text-emerald-400'
-                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              🍳 Cocina (KDS)
-            </Link>
-          )}
-
-          {rol === 'Administrador' && (
-            <Link
-              href="/admin"
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                pathname === '/admin'
-                  ? 'bg-zinc-800 text-rose-400'
-                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-              }`}
-            >
-              📦 Inventario
-            </Link>
-          )}
-        </div>
-
-        {/* Badge de Rol y botón de logout */}
-        <div className="flex items-center gap-3">
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${getBadgeClass()}`}>
-            {rol}
-          </span>
+        {/* Right side: role badge + actions */}
+        <div className="flex items-center gap-2.5">
+          <div className={`flex items-center gap-1.5 rounded-full bg-gradient-to-r ${rolColor[rol] || 'from-zinc-600 to-zinc-700'} px-3 py-1 shadow-lg`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+            <span className="text-[11px] font-bold text-white uppercase tracking-wider">{rol}</span>
+          </div>
           <button
             onClick={handleLogout}
-            className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-all hover:bg-zinc-800 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.06] bg-white/[0.03] text-zinc-500 transition-all hover:bg-white/[0.06] hover:text-white hover:border-white/[0.1]"
+            title="Cambiar Rol"
           >
-            🚪 Cambiar Rol
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+            </svg>
           </button>
         </div>
       </div>
